@@ -1,0 +1,93 @@
+// Server-side only: uses the service-role key, which must never reach the browser.
+// Env vars (set in Netlify): SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+import { createClient } from '@supabase/supabase-js'
+import { randomBytes, randomInt } from 'node:crypto'
+
+const ROLES = ['admin', 'main', 'manager', 'worker']
+const ALPHABET = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+
+const json = (status: number, body: unknown) =>
+  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+
+const newPassword = () => Array.from({ length: 14 }, () => ALPHABET[randomInt(ALPHABET.length)]).join('')
+
+export default async (req: Request) => {
+  if (req.method !== 'POST') return json(405, { error: 'Method not allowed' })
+
+  const url = process.env.SUPABASE_URL
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !serviceKey) return json(500, { error: 'השרת לא מוגדר (חסרים משתני סביבה)' })
+
+  const admin = createClient(url, serviceKey, { auth: { persistSession: false } })
+
+  // Who is calling?
+  const token = req.headers.get('authorization')?.replace(/^Bearer /i, '')
+  if (!token) return json(401, { error: 'לא מחובר' })
+  const { data: userData } = await admin.auth.getUser(token)
+  if (!userData.user) return json(401, { error: 'לא מחובר' })
+  const { data: caller } = await admin
+    .from('employees')
+    .select('role, active, must_change_password, password_changed_at')
+    .eq('user_id', userData.user.id)
+    .maybeSingle()
+  const fresh =
+    caller &&
+    !caller.must_change_password &&
+    caller.password_changed_at &&
+    Date.now() - new Date(caller.password_changed_at).getTime() < 30 * 864e5
+  if (!caller?.active || !fresh || !['admin', 'main'].includes(caller.role)) return json(403, { error: 'אין הרשאה' })
+
+  const body = await req.json().catch(() => null)
+  if (!body) return json(400, { error: 'בקשה לא תקינה' })
+  // Admin and main manager have the same user-management powers.
+
+  if (body.action === 'create') {
+    const email = String(body.email ?? '').trim().toLowerCase()
+    const role = String(body.role ?? 'worker')
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json(400, { error: 'כתובת אימייל לא תקינה' })
+    if (!ROLES.includes(role)) return json(400, { error: 'תפקיד לא תקין' })
+
+    let employeeId: string | undefined = body.employeeId
+    if (employeeId) {
+      const { data: existing } = await admin.from('employees').select('user_id').eq('id', employeeId).maybeSingle()
+      if (!existing) return json(404, { error: 'העובד לא נמצא' })
+      if (existing.user_id) return json(409, { error: 'לעובד כבר יש משתמש' })
+    } else {
+      const name = String(body.name ?? '').trim()
+      if (!name) return json(400, { error: 'חסר שם' })
+      employeeId = `e_${randomBytes(5).toString('hex')}`
+      const { error } = await admin.from('employees').insert({ id: employeeId, name, email })
+      if (error) return json(400, { error: error.message })
+    }
+
+    const password = newPassword()
+    const { data: created, error: createErr } = await admin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+    })
+    if (createErr || !created.user) return json(400, { error: createErr?.message ?? 'יצירת המשתמש נכשלה' })
+
+    const { error } = await admin
+      .from('employees')
+      .update({ user_id: created.user.id, email, role, must_change_password: true, password_changed_at: null })
+      .eq('id', employeeId)
+    if (error) return json(400, { error: error.message })
+    return json(200, { password, employeeId })
+  }
+
+  if (body.action === 'reset') {
+    const { data: target } = await admin.from('employees').select('user_id').eq('id', body.employeeId).maybeSingle()
+    if (!target?.user_id) return json(404, { error: 'למשתמש אין התחברות' })
+    const password = newPassword()
+    const { error } = await admin.auth.admin.updateUserById(target.user_id, { password })
+    if (error) return json(400, { error: error.message })
+    await admin
+      .from('employees')
+      .update({ must_change_password: true, password_changed_at: null })
+      .eq('id', body.employeeId)
+    return json(200, { password, employeeId: body.employeeId })
+  }
+
+  return json(400, { error: 'פעולה לא מוכרת' })
+}

@@ -1,0 +1,63 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Rubik", system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* WeCom orange-red */
+  --color-brand-50: #fff4ef;
+  --color-brand-100: #ffe5da;
+  --color-brand-200: #ffc9b4;
+  --color-brand-300: #ffa07c;
+  --color-brand-400: #ff714a;
+  --color-brand-500: #ff3d00;
+  --color-brand-600: #e03400;
+  --color-brand-700: #b82a00;
+  --color-brand-800: #8a2000;
+  --color-brand-900: #5c1500;
+
+  --shadow-soft: 0 1px 2px rgb(60 30 10 / 0.04), 0 8px 24px -8px rgb(60 30 10 / 0.10);
+  --shadow-lift: 0 2px 4px rgb(60 30 10 / 0.05), 0 16px 40px -12px rgb(60 30 10 / 0.18);
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #faf6f3;
+  background-image:
+    radial-gradient(60rem 28rem at 100% -10%, rgb(255 61 0 / 0.07), transparent 60%),
+    radial-gradient(40rem 24rem at 0% 0%, rgb(255 160 124 / 0.10), transparent 60%);
+  background-attachment: fixed;
+  color: #241c18;
+  font-family: var(--font-sans);
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  cursor: pointer;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rise {
+  animation: rise 0.35s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise {
+    animation: none;
+  }
+}
