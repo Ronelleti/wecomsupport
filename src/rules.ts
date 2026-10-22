@@ -139,7 +139,9 @@ export function validate(
           }
           break
         case 'minPerWeek':
-          if (weekStart && isActive(rule, weekStart)) {
+          // Someone on approved leave that week isn't expected to reach the minimum.
+          const leave = approved.some((t) => t.employeeId === emp.id && t.from <= addDays(weekStart ?? '', 6) && t.to >= (weekStart ?? ''))
+          if (weekStart && !leave && isActive(rule, weekStart)) {
             const n = all.filter((a) => weekStartOf(a.date) === weekStart).length
             if (n < p.min) {
               out.push({

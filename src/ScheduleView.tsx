@@ -55,13 +55,17 @@ export default function ScheduleView({ weekStart, setWeekStart }: Props) {
 
   const generate = () => {
     if (weekAssignments.length && !confirm('יצירה אוטומטית תחליף את כל השיבוץ הקיים בשבוע הזה. להמשיך?')) return
-    const { assignments: draft, unfilled } = autoDraft({ weekStart, employees, rules, existing: assignments, ctx })
+    const { assignments: draft, unfilled, remaining } = autoDraft({ weekStart, employees, rules, existing: assignments, ctx })
     // Shifts a main manager approved as an exception can't be removed by a manager: keep them.
     const locked = canOverride ? [] : weekAssignments.filter((a) => a.override)
     const lockedKeys = new Set(locked.map((a) => `${a.employeeId}|${a.date}`))
     const fresh = draft.filter((a) => !lockedKeys.has(`${a.employeeId}|${a.date}`))
     app.saveAssignments([...assignments.filter((a) => !dates.includes(a.date)), ...locked, ...fresh])
-    if (unfilled) alert(`נשארו ${unfilled} משבצות ריקות: אין עובד פנוי שעומד בכל החוקים.`)
+    const notes = [
+      unfilled && `${unfilled} משבצות נשארו ריקות: אין עובד פנוי שעומד בכל החוקים.`,
+      remaining && `${remaining} אזהרות נשארו: אי אפשר לעמוד בכל החוקים וההעדפות יחד. פרטים תחת "אזהרות".`,
+    ].filter(Boolean)
+    if (notes.length) alert(notes.join('\n'))
   }
 
   const publish = (on: boolean) => {
