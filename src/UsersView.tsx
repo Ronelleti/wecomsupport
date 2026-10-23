@@ -1,5 +1,6 @@
 ﻿import { useState } from 'react'
-import { callUsers } from './db.ts'
+import { api, callUsers } from './db.ts'
+import { useApp } from './store.ts'
 import type { Employee, Role } from './types.ts'
 
 const ROLE_LABEL: Record<Role, string> = { admin: 'אדמין', main: 'מנהל ראשי', manager: 'מנהל', worker: 'עובד' }
@@ -9,7 +10,19 @@ interface Props {
   reload: () => Promise<void>
 }
 
+interface EditForm {
+  id: string
+  name: string
+  target: number
+  schedulable: boolean
+  active: boolean
+  role: Role
+  isNew: boolean
+}
+
 export default function UsersView({ employees, reload }: Props) {
+  const app = useApp()
+  const [edit, setEdit] = useState<EditForm | null>(null)
   const [form, setForm] = useState<{ employeeId?: string; name: string; email: string; role: Role } | null>(null)
   const [secret, setSecret] = useState<{ name: string; email: string; password: string } | null>(null)
   const [error, setError] = useState('')
@@ -42,20 +55,39 @@ export default function UsersView({ employees, reload }: Props) {
     void run(() => callUsers({ action: 'reset', employeeId: e.id }), e.name, e.email ?? '')
   }
 
+  const saveEdit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!edit || !edit.name.trim()) return
+    const res = await app.run(
+      () => api.saveEmployee({ ...edit, name: edit.name.trim() }),
+      edit.isNew ? 'העובד נוסף' : 'נשמר',
+    )
+    if (res.ok) setEdit(null)
+  }
+
   const status = (e: Employee) =>
-    !e.userId ? ['אין משתמש', 'bg-stone-100 text-stone-500'] : e.mustChangePassword ? ['ממתין לכניסה ראשונה', 'bg-amber-100 text-amber-800'] : ['פעיל', 'bg-emerald-100 text-emerald-700']
+    e.active === false ? ['לא פעיל', 'bg-stone-200 text-stone-600'] : !e.userId ? ['אין משתמש', 'bg-stone-100 text-stone-500'] : e.mustChangePassword ? ['ממתין לכניסה ראשונה', 'bg-amber-100 text-amber-800'] : ['פעיל', 'bg-emerald-100 text-emerald-700']
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold">משתמשים</h1>
-        <button
-          type="button"
-          onClick={() => setForm({ name: '', email: '', role: 'worker' })}
-          className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
-        >
-          + עובד חדש
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setEdit({ id: `e_${crypto.randomUUID().slice(0, 8)}`, name: '', target: 5, schedulable: true, active: true, role: 'worker', isNew: true })}
+            className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-brand-700 shadow-soft ring-1 ring-brand-200 hover:bg-brand-50"
+          >
+            + עובד ללא משתמש
+          </button>
+          <button
+            type="button"
+            onClick={() => setForm({ name: '', email: '', role: 'worker' })}
+            className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
+          >
+            + עובד עם משתמש
+          </button>
+        </div>
       </div>
       {error && <p className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
 
@@ -74,6 +106,15 @@ export default function UsersView({ employees, reload }: Props) {
               </div>
               <div className="flex items-center gap-2">
                 <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${tone}`}>{label}</span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setEdit({ id: e.id, name: e.name, target: e.target, schedulable: e.schedulable !== false, active: e.active !== false, role: e.role ?? 'worker', isNew: false })
+                  }
+                  className="rounded-lg px-3 py-1.5 text-sm text-stone-600 ring-1 ring-stone-200 hover:bg-stone-50"
+                >
+                  עריכה
+                </button>
                 {e.userId ? (
                   <button type="button" disabled={busy} onClick={() => reset(e)} className="rounded-lg px-3 py-1.5 text-sm text-brand-700 ring-1 ring-brand-200 hover:bg-brand-50">
                     איפוס סיסמה
@@ -92,6 +133,45 @@ export default function UsersView({ employees, reload }: Props) {
           )
         })}
       </ul>
+
+      {edit && (
+        <Modal onClose={() => setEdit(null)} title={edit.isNew ? 'עובד חדש' : `עריכת ${edit.name}`}>
+          <form onSubmit={(e) => void saveEdit(e)} className="space-y-3">
+            <label className="block text-sm text-stone-600">
+              שם
+              <input className="mt-1 w-full rounded-xl border border-stone-200 px-3 py-2.5" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} required />
+            </label>
+            <label className="block text-sm text-stone-600">
+              יעד משמרות בשבוע
+              <input type="number" min={0} max={7} className="mt-1 w-full rounded-xl border border-stone-200 px-3 py-2.5" value={edit.target} onChange={(e) => setEdit({ ...edit, target: Number(e.target.value) })} />
+            </label>
+            <label className="block text-sm text-stone-600">
+              תפקיד
+              <select
+                className="mt-1 w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5"
+                value={edit.role}
+                disabled={edit.id === app.me?.id}
+                onChange={(e) => setEdit({ ...edit, role: e.target.value as Role })}
+              >
+                {roles.map((r) => (
+                  <option key={r} value={r}>
+                    {ROLE_LABEL[r]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={edit.schedulable} onChange={(e) => setEdit({ ...edit, schedulable: e.target.checked })} />
+              משובץ במשמרות
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={edit.active} disabled={edit.id === app.me?.id} onChange={(e) => setEdit({ ...edit, active: e.target.checked })} />
+              פעיל (עובד לא פעיל לא משובץ ולא יכול להיכנס)
+            </label>
+            <button className="w-full rounded-xl bg-brand-600 py-2.5 font-semibold text-white">שמירה</button>
+          </form>
+        </Modal>
+      )}
 
       {form && (
         <Modal onClose={() => setForm(null)} title={form.employeeId ? `משתמש עבור ${form.name}` : 'עובד חדש'}>

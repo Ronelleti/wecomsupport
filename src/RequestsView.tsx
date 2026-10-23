@@ -1,7 +1,9 @@
-﻿import { fmtDM } from './dates.ts'
+﻿import { useState } from 'react'
+import { addDays, fmtDM, toISO, weekStartOf } from './dates.ts'
 import { api } from './db.ts'
 import { useNameOf } from './employees-context.ts'
 import { describeId } from './PersonalViews.tsx'
+import { WeekNav } from './ScheduleView.tsx'
 import { useApp } from './store.ts'
 import { swapViolations } from './swaps.ts'
 import type { Swap } from './types.ts'
@@ -125,6 +127,47 @@ export default function RequestsView() {
           </div>
         ))}
       </section>
+
+      <PrefsStatus />
     </div>
+  )
+}
+
+/** Who has sent next week's preferences, with a reminder button for the rest. */
+function PrefsStatus() {
+  const app = useApp()
+  const [weekStart, setWeekStart] = useState(() => addDays(weekStartOf(toISO(new Date())), 7))
+  const people = app.schedulable.filter((e) => e.userId && e.target > 0)
+  const sent = new Set(app.prefs.filter((p) => p.weekStart === weekStart).map((p) => p.employeeId))
+  const missing = people.filter((e) => !sent.has(e.id))
+  const due = addDays(weekStart, -7 + app.config.prefDeadlineDay)
+
+  const remind = async () => {
+    const res = await app.run(() => api.remindPreferences(weekStart))
+    if (res.ok) alert(`נשלחה תזכורת ל-${res.value} עובדים`)
+  }
+
+  return (
+    <section className="space-y-3">
+      <h2 className="text-sm font-bold text-stone-500">העדפות לשבוע</h2>
+      <WeekNav weekStart={weekStart} setWeekStart={setWeekStart} />
+      <div className="rounded-2xl bg-white p-4 shadow-soft ring-1 ring-stone-200/70">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="font-semibold">
+            {sent.size} מתוך {people.length} שלחו
+            <span className="ms-2 text-xs font-normal text-stone-500">מועד אחרון: {fmtDM(due)}</span>
+          </div>
+          <button
+            type="button"
+            disabled={missing.length === 0}
+            onClick={() => void remind()}
+            className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-40"
+          >
+            🔔 שלח תזכורת ({missing.length})
+          </button>
+        </div>
+        {missing.length > 0 && <p className="mt-2 text-sm text-stone-600">עוד לא שלחו: {missing.map((e) => e.name).join(', ')}</p>}
+      </div>
+    </section>
   )
 }

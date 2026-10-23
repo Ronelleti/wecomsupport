@@ -45,6 +45,22 @@ export interface Rule {
   params: RuleParams
 }
 
+/** Staffing needs by day type (0 = Sunday .. 6 = Saturday, 7 = holiday), holidays, and settings. */
+export interface Config {
+  staffing: Record<number, Record<ShiftKind, number>>
+  holidays: Record<string, string>
+  /** Day of the week (0 = Sunday) by which next week's preferences are due. */
+  prefDeadlineDay: number
+}
+
+export interface AuditEntry {
+  id: number
+  at: string
+  actorId: string | null
+  action: string
+  detail: Record<string, unknown>
+}
+
 export interface TimeOff {
   id: string
   employeeId: string

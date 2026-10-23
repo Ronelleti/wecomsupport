@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react'
-import type { Assignment, Employee, Notice, Preference, Role, Rule, Swap, TimeOff } from './types.ts'
+import type { Assignment, Config, Employee, Notice, Preference, Role, Rule, ShiftKind, Swap, TimeOff } from './types.ts'
 
 export type Result<T> = { ok: true; value: T } | { ok: false }
 
@@ -18,8 +18,13 @@ export interface AppState {
   prefs: Preference[]
   swaps: Swap[]
   notices: Notice[]
+  config: Config
+  /** Required headcount for a shift on a given date (honours holidays). */
+  need: (date: string, kind: ShiftKind) => number
   saveAssignments: (a: Assignment[]) => void
   saveRules: (r: Rule[]) => void
+  canUndo: boolean
+  undo: () => void
   /** Runs a server action, refreshes the data and shows `done` (or the error). */
   run: <T>(fn: () => Promise<T>, done?: string) => Promise<Result<T>>
   go: (tab: string) => void

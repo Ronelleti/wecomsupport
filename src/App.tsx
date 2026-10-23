@@ -4,7 +4,8 @@ import { ChangePassword, Loading, Login, NoAccess } from './AuthScreens.tsx'
 import Bell from './Bell.tsx'
 import Logo from './Logo.tsx'
 import { addDays, toISO, weekStartOf } from './dates.ts'
-import { EMPLOYEES, INITIAL_RULES, demoAssignments } from './data.ts'
+import AuditView from './AuditView.tsx'
+import { DEFAULT_CONFIG, EMPLOYEES, INITIAL_RULES, demoAssignments, makeNeed } from './data.ts'
 import {
   fetchAssignments,
   fetchEmployees,
@@ -20,6 +21,7 @@ import { MyShiftsView, PreferencesView, SwapsView, TimeOffView } from './Persona
 import RequestsView from './RequestsView.tsx'
 import RulesView from './RulesView.tsx'
 import ScheduleView from './ScheduleView.tsx'
+import SettingsView from './SettingsView.tsx'
 import { AppContext, canApprove, type AppState } from './store.ts'
 import { supabase } from './supabase.ts'
 import type { Assignment, Employee, Role, Rule } from './types.ts'
@@ -35,9 +37,11 @@ const ROLES: Record<Role, string> = {
   worker: 'עובד',
 }
 
-const NO_EXTRAS: Extras = { weeks: {}, timeOff: [], prefs: [], swaps: [], notices: [] }
+const NO_EXTRAS: Extras = { weeks: {}, timeOff: [], prefs: [], swaps: [], notices: [], config: DEFAULT_CONFIG }
 
-type Base = Omit<AppState, 'go' | 'schedulable'>
+type Base = Omit<AppState, 'go' | 'schedulable' | 'need'>
+
+const MAX_UNDO = 10
 
 interface ShellProps {
   base: Base
@@ -55,7 +59,8 @@ function Shell({ base, initialWeek, onRoleChange, onLogout, error, toast }: Shel
   const { role, me, online } = base
 
   const schedulable = useMemo(() => base.employees.filter((e) => e.schedulable !== false && e.active !== false), [base.employees])
-  const value = useMemo<AppState>(() => ({ ...base, schedulable, go: setTab }), [base, schedulable])
+  const need = useMemo(() => makeNeed(base.config), [base.config])
+  const value = useMemo<AppState>(() => ({ ...base, schedulable, need, go: setTab }), [base, schedulable, need])
 
   const personal = online && me?.schedulable !== false
   const tabs: { id: string; label: string }[] = [
@@ -64,7 +69,9 @@ function Shell({ base, initialWeek, onRoleChange, onLogout, error, toast }: Shel
     ...(online && canApprove(role) ? [{ id: 'requests', label: 'בקשות' }] : []),
     ...(personal ? [{ id: 'swaps', label: 'החלפות' }, { id: 'timeoff', label: 'חופשות' }, { id: 'prefs', label: 'העדפות' }] : []),
     ...(role === 'admin' || role === 'main' ? [{ id: 'rules', label: 'חוקים' }] : []),
-    ...(online && (role === 'admin' || role === 'main') ? [{ id: 'users', label: 'משתמשים' }] : []),
+    ...(online && (role === 'admin' || role === 'main')
+      ? [{ id: 'users', label: 'משתמשים' }, { id: 'settings', label: 'הגדרות' }, { id: 'log', label: 'יומן שינויים' }]
+      : []),
   ]
   const current = tabs.some((t) => t.id === tab) ? tab : tabs[0].id
 
@@ -132,6 +139,8 @@ function Shell({ base, initialWeek, onRoleChange, onLogout, error, toast }: Shel
             {current === 'prefs' && <PreferencesView />}
             {current === 'rules' && <RulesView rules={base.rules} setRules={base.saveRules} role={role} />}
             {current === 'users' && me && <UsersView employees={base.employees} reload={async () => void (await base.run(async () => null))} />}
+            {current === 'settings' && <SettingsView />}
+            {current === 'log' && <AuditView />}
           </main>
 
           {toast && (
@@ -149,6 +158,35 @@ function Shell({ base, initialWeek, onRoleChange, onLogout, error, toast }: Shel
   )
 }
 
+/** Keeps the last few assignment lists so the previous one can be restored. */
+function useUndo(
+  assignments: Assignment[],
+  setAssignments: (a: Assignment[]) => void,
+  persist?: (prev: Assignment[], next: Assignment[]) => Promise<void>,
+  onFail?: (e: unknown) => void,
+) {
+  const [history, setHistory] = useState<Assignment[][]>([])
+
+  const change = (next: Assignment[], remember: boolean) => {
+    const prev = assignments
+    if (remember) setHistory((h) => [...h.slice(-(MAX_UNDO - 1)), prev])
+    setAssignments(next)
+    persist?.(prev, next).catch((e: unknown) => {
+      setAssignments(prev)
+      onFail?.(e)
+    })
+  }
+
+  const undo = () => {
+    const last = history[history.length - 1]
+    if (!last) return
+    setHistory((h) => h.slice(0, -1))
+    change(last, false)
+  }
+
+  return { save: (next: Assignment[]) => change(next, true), undo, canUndo: history.length > 0 }
+}
+
 /** No Supabase env vars: schedule and rules only, kept in this browser. */
 function Demo() {
   const [initial] = useState(() => {
@@ -163,6 +201,7 @@ function Demo() {
   const [assignments, setAssignments] = useState(initial.assignments)
   const [rules, setRules] = useState(initial.rules)
   const [role, setRole] = useState<Role>('main')
+  const history = useUndo(assignments, setAssignments)
 
   useEffect(() => {
     try {
@@ -179,8 +218,10 @@ function Demo() {
     employees: EMPLOYEES,
     assignments,
     rules,
-    saveAssignments: setAssignments,
+    saveAssignments: history.save,
     saveRules: setRules,
+    canUndo: history.canUndo,
+    undo: history.undo,
     run: async (fn) => ({ ok: true, value: await fn() }),
   }
   return <Shell base={base} initialWeek="2026-10-25" onRoleChange={setRole} />
@@ -273,14 +314,11 @@ function Authed() {
     [loadAll, flash],
   )
 
-  const saveAssignments = (next: Assignment[]) => {
-    const prev = assignments
-    setAssignments(next)
-    syncAssignments(prev, next).catch((e: unknown) => {
-      setAssignments(prev)
-      flash(e instanceof Error && e.message ? `השמירה נכשלה: ${e.message}` : 'השמירה נכשלה', 'err')
-    })
-  }
+  const history = useUndo(assignments, setAssignments, syncAssignments, (e) => {
+    const msg = typeof e === 'object' && e && 'message' in e ? String((e as { message: unknown }).message) : ''
+    flash(msg ? `השמירה נכשלה: ${msg}` : 'השמירה נכשלה', 'err')
+  })
+  const saveAssignments = history.save
 
   const saveRules = (next: Rule[]) => {
     const prev = rules
@@ -316,6 +354,8 @@ function Authed() {
     rules,
     saveAssignments,
     saveRules,
+    canUndo: history.canUndo,
+    undo: history.undo,
     run,
   }
   return <Shell base={base} initialWeek={addDays(weekStartOf(toISO(new Date())), 0)} onLogout={logout} error={error} toast={toast} />

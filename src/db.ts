@@ -1,5 +1,6 @@
+import { DEFAULT_CONFIG } from './data.ts'
 import { supabase } from './supabase.ts'
-import type { Assignment, Employee, Notice, Preference, Role, Rule, Swap, SwapStatus, TimeOff } from './types.ts'
+import type { Assignment, AuditEntry, Config, Employee, Notice, Preference, Role, Rule, ShiftKind, Swap, SwapStatus, TimeOff } from './types.ts'
 
 const db = () => {
   if (!supabase) throw new Error('Supabase is not configured')
@@ -120,13 +121,22 @@ export async function syncAssignments(prev: Assignment[], next: Assignment[]) {
   }
 }
 
-/** Upserts only the rules that changed. */
+/** Upserts the rules that changed and deletes the ones that were removed. */
 export async function syncRules(prev: Rule[], next: Rule[]) {
   const before = new Map(prev.map((r) => [r.id, JSON.stringify(r)]))
+  const nextIds = new Set(next.map((r) => r.id))
+  const removed = prev.filter((r) => !nextIds.has(r.id)).map((r) => r.id)
   const changed = next.filter((r) => before.get(r.id) !== JSON.stringify(r))
-  if (!changed.length) return
-  const { error } = await db().from('rules').upsert(changed.map(fromRule))
-  if (error) throw error
+  if (removed.length) {
+    const { error } = await db().from('rules').delete().in('id', removed)
+    if (error) throw error
+  }
+  if (changed.length) {
+    // `sort` follows the order in the list, so new rules appear where the user put them.
+    const rows = changed.map((r) => ({ ...fromRule(r), sort: next.findIndex((x) => x.id === r.id) }))
+    const { error } = await db().from('rules').upsert(rows)
+    if (error) throw error
+  }
 }
 
 export interface Extras {
@@ -135,6 +145,7 @@ export interface Extras {
   prefs: Preference[]
   swaps: Swap[]
   notices: Notice[]
+  config: Config
 }
 
 const must = <T>(r: { data: T | null; error: unknown }): T => {
@@ -144,14 +155,28 @@ const must = <T>(r: { data: T | null; error: unknown }): T => {
 
 export async function fetchExtras(): Promise<Extras> {
   const c = db()
-  const [weeks, timeOff, prefs, swaps, notices] = await Promise.all([
+  const [weeks, timeOff, prefs, swaps, notices, staffing, holidays, settings] = await Promise.all([
     c.from('weeks').select('*'),
     c.from('time_off').select('*').order('from_date'),
     c.from('preferences').select('*'),
     c.from('swaps').select('*').order('created_at', { ascending: false }),
     c.from('notifications').select('*').order('created_at', { ascending: false }).limit(50),
+    c.from('staffing').select('*'),
+    c.from('holidays').select('*'),
+    c.from('app_settings').select('*'),
   ])
+  const config: Config = {
+    staffing: structuredClone(DEFAULT_CONFIG.staffing),
+    holidays: Object.fromEntries(must<{ date: string; name: string }[]>(holidays).map((h) => [h.date, h.name])),
+    prefDeadlineDay: DEFAULT_CONFIG.prefDeadlineDay,
+  }
+  for (const s of must<{ day_type: number; kind: ShiftKind; required: number }[]>(staffing)) {
+    config.staffing[s.day_type] = { ...config.staffing[s.day_type], [s.kind]: s.required }
+  }
+  const deadline = must<{ key: string; value: unknown }[]>(settings).find((s) => s.key === 'pref_deadline_day')
+  if (typeof deadline?.value === 'number') config.prefDeadlineDay = deadline.value
   return {
+    config,
     weeks: Object.fromEntries(
       must<{ week_start: string; published: boolean }[]>(weeks).map((w) => [w.week_start, w.published]),
     ),
@@ -222,11 +247,52 @@ export const api = {
       .upsert({ employee_id: p.employeeId, week_start: p.weekStart, cells: p.cells, note: p.note, updated_at: new Date().toISOString() })
     if (error) throw new Error(error.message)
   },
+  async saveEmployee(e: { id: string; name: string; target: number; schedulable: boolean; active: boolean; role?: Role; isNew?: boolean }) {
+    const row = { id: e.id, name: e.name, target: e.target, schedulable: e.schedulable, active: e.active, ...(e.role ? { role: e.role } : {}) }
+    const { error } = e.isNew ? await db().from('employees').insert(row) : await db().from('employees').update(row).eq('id', e.id)
+    if (error) throw new Error(error.message)
+  },
+  async saveStaffing(config: Config) {
+    const rows = Object.entries(config.staffing).flatMap(([day, kinds]) =>
+      Object.entries(kinds).map(([kind, required]) => ({ day_type: Number(day), kind, required })),
+    )
+    const { error } = await db().from('staffing').upsert(rows)
+    if (error) throw new Error(error.message)
+  },
+  async saveHolidays(holidays: Record<string, string>, removed: string[]) {
+    if (removed.length) {
+      const { error } = await db().from('holidays').delete().in('date', removed)
+      if (error) throw new Error(error.message)
+    }
+    const rows = Object.entries(holidays).map(([date, name]) => ({ date, name }))
+    if (rows.length) {
+      const { error } = await db().from('holidays').upsert(rows)
+      if (error) throw new Error(error.message)
+    }
+  },
+  async savePrefDeadline(day: number) {
+    const { error } = await db().from('app_settings').upsert({ key: 'pref_deadline_day', value: day })
+    if (error) throw new Error(error.message)
+  },
+  remindPreferences: (week: string) => rpc('remind_preferences', { p_week: week }) as Promise<number>,
+  calendarToken: () => rpc('get_calendar_token', {}) as Promise<string>,
   async markRead(ids: string[]) {
     if (!ids.length) return
     const { error } = await db().from('notifications').update({ read: true }).in('id', ids)
     if (error) throw new Error(error.message)
   },
+}
+
+export async function fetchAudit(limit = 300): Promise<AuditEntry[]> {
+  const { data, error } = await db().from('audit_log').select('*').order('id', { ascending: false }).limit(limit)
+  if (error) throw error
+  return (data as { id: number; at: string; actor_id: string | null; action: string; detail: Record<string, unknown> }[]).map((r) => ({
+    id: r.id,
+    at: r.at,
+    actorId: r.actor_id,
+    action: r.action,
+    detail: r.detail,
+  }))
 }
 
 export async function markPasswordChanged() {

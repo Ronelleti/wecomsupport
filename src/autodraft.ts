@@ -1,4 +1,4 @@
-import { KINDS, required } from './data.ts'
+import { KINDS } from './data.ts'
 import { addDays, weekDates, weekday } from './dates.ts'
 import { validate, type Context } from './rules.ts'
 import type { Assignment, Employee, Rule, ShiftKind } from './types.ts'
@@ -15,6 +15,8 @@ interface Options {
   /** Everything already saved; shifts inside the target week are ignored. */
   existing: Assignment[]
   ctx: Context
+  /** Required headcount for a shift. */
+  need: (date: string, kind: ShiftKind) => number
   seed?: number
 }
 
@@ -48,7 +50,7 @@ const mk = (date: string, kind: ShiftKind, employeeId: string): Assignment => ({
  *  3. repairs weekly minimums by swapping shifts from people who can spare them,
  *     or by adding an extra shift when needed.
  */
-export function autoDraft({ weekStart, employees, rules, existing, ctx, seed = 1 }: Options): DraftResult {
+export function autoDraft({ weekStart, employees, rules, existing, ctx, need: needFor, seed = 1 }: Options): DraftResult {
   const dates = weekDates(weekStart)
   const weekEnd = addDays(weekStart, 6)
   const base = existing.filter(
@@ -132,7 +134,7 @@ export function autoDraft({ weekStart, employees, rules, existing, ctx, seed = 1
   const slots: Slot[] = []
   for (const date of dates) {
     for (const kind of KINDS) {
-      for (let i = 0; i < required(date, kind, weekday(date)); i++) slots.push({ date, kind })
+      for (let i = 0; i < needFor(date, kind); i++) slots.push({ date, kind })
     }
   }
   slots.sort((a, b) => slotOrder(a) - slotOrder(b) || a.date.localeCompare(b.date))
@@ -231,9 +233,9 @@ export function autoDraft({ weekStart, employees, rules, existing, ctx, seed = 1
       for (const date of dates) {
         if (chosen.some((x) => x.employeeId === e.id && x.date === date)) continue
         for (const kind of KINDS) {
-          const need = required(date, kind, weekday(date))
-          if (need === 0) continue
-          const crowd = chosen.filter((x) => x.date === date && x.kind === kind).length - need
+          const required = needFor(date, kind)
+          if (required === 0) continue
+          const crowd = chosen.filter((x) => x.date === date && x.kind === kind).length - required
           const next = [...chosen, mk(date, kind, e.id)]
           const c = cost(next)
           if (c < baseCost && (!bestAdd || c < bestAdd.c || (c === bestAdd.c && crowd < bestAdd.crowd))) bestAdd = { next, c, crowd }

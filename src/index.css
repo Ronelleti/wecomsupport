@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Rubik", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: "Rubik Variable", "Rubik", system-ui, -apple-system, "Segoe UI", sans-serif;
 
   /* WeCom orange-red */
   --color-brand-50: #fff4ef;
@@ -39,6 +39,27 @@ body {
 
 button {
   cursor: pointer;
+}
+
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 10mm;
+  }
+  body {
+    background: #fff;
+  }
+  body * {
+    visibility: hidden;
+  }
+  #print-sheet,
+  #print-sheet * {
+    visibility: visible;
+  }
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
 }
 
 @keyframes rise {

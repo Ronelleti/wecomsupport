@@ -2,8 +2,9 @@
 import { autoDraft } from './autodraft.ts'
 import { HE_DAYS, HE_DAYS_SHORT, addDays, fmtDM, toISO, weekDates, weekday } from './dates.ts'
 import { api } from './db.ts'
-import { HOLIDAYS, KINDS, SHIFTS, required } from './data.ts'
+import { KINDS, SHIFTS } from './data.ts'
 import { useEmployees, useNameOf } from './employees-context.ts'
+import { ExportSheet, exportExcel, exportImage, printWeek, type SheetData } from './exportWeek.tsx'
 import { checkAdd, validate, type Context } from './rules.ts'
 import { isStaff, useApp } from './store.ts'
 import type { Assignment, Rule, ShiftKind, Violation } from './types.ts'
@@ -15,7 +16,8 @@ interface Props {
 
 export default function ScheduleView({ weekStart, setWeekStart }: Props) {
   const app = useApp()
-  const { role, me, assignments, rules, timeOff, prefs, online } = app
+  const { role, me, assignments, rules, timeOff, prefs, online, need: needFor } = app
+  const HOLIDAYS = app.config.holidays
   const employees = useEmployees()
   const nameOf = useNameOf()
   const dates = weekDates(weekStart)
@@ -50,8 +52,10 @@ export default function ScheduleView({ weekStart, setWeekStart }: Props) {
 
   let shortage = 0
   for (const d of dates) {
-    for (const k of KINDS) shortage += Math.max(0, required(d, k, weekday(d)) - inCell(d, k).length)
+    for (const k of KINDS) shortage += Math.max(0, needFor(d, k) - inCell(d, k).length)
   }
+
+  const sheet: SheetData = { weekStart, assignments: weekAssignments, employees, holidays: HOLIDAYS, nameOf }
 
   const clearWeek = () => {
     if (!weekAssignments.length) return
@@ -72,7 +76,7 @@ export default function ScheduleView({ weekStart, setWeekStart }: Props) {
 
   const generate = () => {
     if (weekAssignments.length && !confirm('יצירה אוטומטית תחליף את כל השיבוץ הקיים בשבוע הזה. להמשיך?')) return
-    const { assignments: draft, unfilled, remaining } = autoDraft({ weekStart, employees, rules, existing: assignments, ctx })
+    const { assignments: draft, unfilled, remaining } = autoDraft({ weekStart, employees, rules, existing: assignments, ctx, need: needFor })
     // Shifts a main manager approved as an exception can't be removed by a manager: keep them.
     const locked = canOverride ? [] : weekAssignments.filter((a) => a.override)
     const lockedKeys = new Set(locked.map((a) => `${a.employeeId}|${a.date}`))
@@ -95,7 +99,7 @@ export default function ScheduleView({ weekStart, setWeekStart }: Props) {
 
   const renderCell = (date: string, kind: ShiftKind) => {
     const people = inCell(date, kind)
-    const need = required(date, kind, weekday(date))
+    const need = needFor(date, kind)
     if (need === 0 && people.length === 0) {
       return <div className="flex h-full min-h-14 items-center justify-center text-xs text-stone-300">—</div>
     }
@@ -203,6 +207,7 @@ export default function ScheduleView({ weekStart, setWeekStart }: Props) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <WeekNav weekStart={weekStart} setWeekStart={setWeekStart} />
+        {(staff || published) && <ExportMenu sheet={sheet} />}
         {staff && (
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <Stat tone={shortage ? 'rose' : 'emerald'} label="חוסר" value={shortage} />
@@ -240,6 +245,14 @@ export default function ScheduleView({ weekStart, setWeekStart }: Props) {
             className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-rose-700 shadow-sm ring-1 ring-rose-200 hover:bg-rose-50 disabled:opacity-40 disabled:hover:bg-white"
           >
             🗑 מחיקת השבוע
+          </button>
+          <button
+            type="button"
+            onClick={app.undo}
+            disabled={!app.canUndo}
+            className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-stone-700 shadow-sm ring-1 ring-stone-200 hover:bg-stone-50 disabled:opacity-40 disabled:hover:bg-white"
+          >
+            ↶ ביטול פעולה
           </button>
           {online && (
             <button
@@ -285,6 +298,53 @@ export default function ScheduleView({ weekStart, setWeekStart }: Props) {
       )}
 
       {staff && <WeekPanel assignments={weekAssignments} violations={violations} weekStart={weekStart} />}
+      {(staff || published) && <ExportSheet {...sheet} />}
+    </div>
+  )
+}
+
+function ExportMenu({ sheet }: { sheet: SheetData }) {
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const item = 'block w-full px-4 py-2.5 text-start text-sm hover:bg-stone-50 disabled:opacity-50'
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-stone-700 shadow-soft ring-1 ring-stone-200/70 hover:bg-stone-50"
+      >
+        ⬇ ייצוא והדפסה
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute start-0 top-11 z-50 w-56 overflow-hidden rounded-2xl bg-white shadow-lift ring-1 ring-stone-200">
+            <button type="button" className={item} onClick={() => { exportExcel(sheet); setOpen(false) }}>
+              📊 Excel
+            </button>
+            <button type="button" className={item} onClick={() => { setOpen(false); setTimeout(printWeek, 50) }}>
+              🖨 PDF / הדפסה
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              className={item}
+              onClick={async () => {
+                setBusy(true)
+                try {
+                  await exportImage(sheet.weekStart)
+                } finally {
+                  setBusy(false)
+                  setOpen(false)
+                }
+              }}
+            >
+              🖼 תמונה / שיתוף בוואטסאפ
+            </button>
+          </div>
+        </>
+      )}
     </div>
   )
 }

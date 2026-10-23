@@ -1,4 +1,5 @@
-import type { Assignment, Employee, Rule, ShiftKind } from './types.ts'
+import { weekday } from './dates.ts'
+import type { Assignment, Config, Employee, Rule, ShiftKind } from './types.ts'
 
 export const KINDS: ShiftKind[] = ['morning', 'mid', 'evening', 'night']
 
@@ -12,16 +13,30 @@ export const SHIFTS: Record<
   night: { label: 'לילה', time: '23:00–08:00', start: 23, head: 'bg-slate-800 text-white', cell: 'bg-slate-100/60' },
 }
 
-export const HOLIDAYS: Record<string, string> = {
-  '2026-10-27': 'יום בחירות',
+const weekdayNeed = { morning: 5, mid: 2, evening: 5, night: 1 }
+
+/** Used in demo mode and until a database value exists. Index 7 is "holiday". */
+export const DEFAULT_CONFIG: Config = {
+  staffing: {
+    0: weekdayNeed,
+    1: weekdayNeed,
+    2: weekdayNeed,
+    3: weekdayNeed,
+    4: weekdayNeed,
+    5: { morning: 5, mid: 2, evening: 4, night: 1 },
+    6: { morning: 2, mid: 0, evening: 2, night: 1 },
+    7: { morning: 5, mid: 0, evening: 5, night: 1 },
+  },
+  holidays: { '2026-10-27': 'יום בחירות' },
+  prefDeadlineDay: 3,
 }
 
-/** Required headcount per shift. */
-export function required(date: string, kind: ShiftKind, weekday: number): number {
-  if (HOLIDAYS[date] && kind === 'mid') return 0
-  if (weekday === 6) return { morning: 2, mid: 0, evening: 2, night: 1 }[kind]
-  if (weekday === 5) return { morning: 5, mid: 2, evening: 4, night: 1 }[kind]
-  return { morning: 5, mid: 2, evening: 5, night: 1 }[kind]
+/** Required headcount for a shift: holidays use their own row, other days use the weekday's row. */
+export function makeNeed(config: Config) {
+  return (date: string, kind: ShiftKind): number => {
+    const row = config.holidays[date] ? 7 : weekday(date)
+    return config.staffing[row]?.[kind] ?? 0
+  }
 }
 
 const E = (id: string, name: string, target = 5): Employee => ({ id, name, target })

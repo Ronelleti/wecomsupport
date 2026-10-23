@@ -3,6 +3,7 @@ import { HE_DAYS, addDays, fmtDM, fromISO, toISO, weekDates, weekStartOf, weekda
 import { api } from './db.ts'
 import { KINDS, SHIFTS } from './data.ts'
 import { useNameOf } from './employees-context.ts'
+import { buildIcs } from './ics.ts'
 import { Sheet, WeekNav } from './ScheduleView.tsx'
 import { useApp } from './store.ts'
 import { parseAssignmentId, swapViolations } from './swaps.ts'
@@ -38,7 +39,9 @@ export function MyShiftsView({ weekStart, setWeekStart }: { weekStart: string; s
   const [swapping, setSwapping] = useState<Assignment | null>(null)
   const dates = weekDates(weekStart)
   const published = !!weeks[weekStart]
-  const mine = assignments.filter((a) => a.employeeId === me?.id)
+  const [calendar, setCalendar] = useState(false)
+  // Managers can also see drafts; a person's own list only counts published weeks.
+  const mine = assignments.filter((a) => a.employeeId === me?.id && weeks[weekStartOf(a.date)])
   const total = mine.filter((a) => dates.includes(a.date)).length
   const next = mine.filter((a) => a.date >= today()).sort((x, y) => x.date.localeCompare(y.date))[0]
   const daysAway = next ? Math.round((fromISO(next.date).getTime() - fromISO(today()).getTime()) / 864e5) : 0
@@ -70,7 +73,13 @@ export function MyShiftsView({ weekStart, setWeekStart }: { weekStart: string; s
           </div>
         </div>
       )}
-      <WeekNav weekStart={weekStart} setWeekStart={setWeekStart} />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <WeekNav weekStart={weekStart} setWeekStart={setWeekStart} />
+        <button type="button" onClick={() => setCalendar(true)} className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-stone-700 shadow-soft ring-1 ring-stone-200/70 hover:bg-stone-50">
+          📅 הוספה ליומן
+        </button>
+      </div>
+      {calendar && <CalendarDialog shifts={mine} onClose={() => setCalendar(false)} />}
       {!published ? (
         <div className={`${card} py-12 text-center text-stone-500`}>הסידור לשבוע הזה טרם פורסם</div>
       ) : (
@@ -111,6 +120,78 @@ export function MyShiftsView({ weekStart, setWeekStart }: { weekStart: string; s
       )}
       {swapping && <SwapDialog mine={swapping} onClose={() => setSwapping(null)} />}
     </div>
+  )
+}
+
+function CalendarDialog({ shifts, onClose }: { shifts: Assignment[]; onClose: () => void }) {
+  const app = useApp()
+  const [link, setLink] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  const download = () => {
+    const upcoming = shifts.filter((s) => s.date >= today())
+    const blob = new Blob([buildIcs(upcoming)], { type: 'text/calendar;charset=utf-8' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = 'shifts.ics'
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
+
+  const getLink = async () => {
+    setBusy(true)
+    const res = await app.run(() => api.calendarToken())
+    setBusy(false)
+    if (res.ok) setLink(`${location.origin}/.netlify/functions/calendar?token=${res.value}`)
+  }
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(link)
+      setCopied(true)
+    } catch {
+      // clipboard blocked: the link is selectable in the box
+    }
+  }
+
+  return (
+    <Sheet title="הוספה ליומן" onClose={onClose}>
+      <div className="space-y-4 text-sm">
+        <div>
+          <div className="font-semibold">מנוי אוטומטי (מומלץ)</div>
+          <p className="mt-1 text-stone-500">היומן שלך יתעדכן לבד כשמתפרסם סידור חדש או כשיש החלפה.</p>
+          {!link ? (
+            <button type="button" disabled={busy} onClick={() => void getLink()} className={`${primary} mt-2`}>
+              קבלת קישור אישי
+            </button>
+          ) : (
+            <div className="mt-2 space-y-2">
+              <input readOnly dir="ltr" value={link} onFocus={(e) => e.currentTarget.select()} className={`${field} text-xs`} />
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => void copy()} className={primary}>
+                  {copied ? 'הועתק ✓' : 'העתקת הקישור'}
+                </button>
+                <a href={link.replace(/^https?:/, 'webcal:')} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-brand-700 ring-1 ring-brand-200 hover:bg-brand-50">
+                  פתיחה באייפון / מק
+                </a>
+              </div>
+              <p className="text-xs text-stone-500">
+                ב-Google Calendar: הגדרות → הוספת יומן → מכתובת URL, והדביקו את הקישור. אל תשתפו אותו, הוא אישי.
+              </p>
+            </div>
+          )}
+        </div>
+        <hr className="border-stone-100" />
+        <div>
+          <div className="font-semibold">קובץ חד-פעמי</div>
+          <p className="mt-1 text-stone-500">מוסיף את המשמרות הקרובות עכשיו, בלי עדכונים אוטומטיים.</p>
+          <button type="button" onClick={download} className="mt-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-stone-700 ring-1 ring-stone-200 hover:bg-stone-50">
+            הורדת קובץ .ics
+          </button>
+        </div>
+      </div>
+    </Sheet>
   )
 }
 
@@ -358,6 +439,9 @@ function PrefsEditor({ weekStart, setWeekStart, saved }: { weekStart: string; se
   const [cells, setCells] = useState<Preference['cells']>(saved?.cells ?? {})
   const [note, setNote] = useState(saved?.note ?? '')
   const dates = weekDates(weekStart)
+  // Preferences for a week are due on a set weekday of the week before it.
+  const due = addDays(weekStart, -7 + app.config.prefDeadlineDay)
+  const late = today() > due
 
   const cycle = (key: string) =>
     setCells((c) => {
@@ -382,6 +466,10 @@ function PrefsEditor({ weekStart, setWeekStart, saved }: { weekStart: string; se
     <div className="space-y-4">
       <h1 className="text-xl font-bold">העדפות לשבוע</h1>
       <WeekNav weekStart={weekStart} setWeekStart={setWeekStart} />
+      <p className={`text-sm ${late && !saved ? 'font-semibold text-rose-600' : 'text-stone-500'}`}>
+        {saved ? '✓ ההעדפות לשבוע הזה נשלחו. אפשר לעדכן.' : `מועד אחרון לשליחה: יום ${HE_DAYS[app.config.prefDeadlineDay]} ${fmtDM(due)}`}
+        {late && !saved ? ' · המועד עבר, אבל עדיין אפשר לשלוח' : ''}
+      </p>
       <p className="text-sm text-stone-500">לחצו על משבצת: פעם אחת ✓ = מעדיף, פעמיים ✕ = לא יכול, שוב = ביטול. המנהל מתחשב בזה בשיבוץ.</p>
       <div className={`${card} overflow-x-auto`}>
         <table className="w-full min-w-[34rem] border-separate border-spacing-1 text-center text-sm">
