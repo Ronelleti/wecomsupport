@@ -1,5 +1,6 @@
 ﻿import { useEffect, useRef, useState } from 'react'
 import { api } from './db.ts'
+import { disablePush, enablePush, pushConfigured, pushState, sendTestPush, type PushState } from './push.ts'
 import { useApp } from './store.ts'
 
 const ago = (iso: string) => {
@@ -8,6 +9,71 @@ const ago = (iso: string) => {
   if (mins < 60) return `לפני ${mins} דק׳`
   if (mins < 1440) return `לפני ${Math.round(mins / 60)} שע׳`
   return `לפני ${Math.round(mins / 1440)} ימים`
+}
+
+/** Turn phone / browser notifications on or off for this device. */
+function PushControl() {
+  const [state, setState] = useState<PushState | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  useEffect(() => {
+    let alive = true
+    void pushState().then((s) => alive && setState(s))
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  if (!pushConfigured() || state === null) return null
+
+  const act = async (fn: () => Promise<void>, ok = '') => {
+    setBusy(true)
+    setMsg('')
+    try {
+      await fn()
+      setMsg(ok)
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'הפעולה נכשלה')
+    }
+    setState(await pushState())
+    setBusy(false)
+  }
+
+  const btn = 'rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-50'
+  return (
+    <div className="border-b border-stone-100 bg-stone-50 px-4 py-3 text-xs text-stone-600">
+      {state === 'unsupported' && <p>המכשיר או הדפדפן הזה לא תומכים בהתראות לטלפון.</p>}
+      {state === 'needs-install' && (
+        <p>
+          באייפון צריך קודם להוסיף את האפליקציה למסך הבית: ב-Safari לחצו על כפתור השיתוף (⬆) ← ״הוספה למסך הבית״, ופתחו אותה משם. אחרי זה תוכלו להפעיל התראות.
+        </p>
+      )}
+      {state === 'denied' && <p>ההתראות חסומות במכשיר. אפשר לאפשר אותן בהגדרות הדפדפן או האפליקציה.</p>}
+      {state === 'off' && (
+        <div className="flex items-center justify-between gap-2">
+          <span>קבלו התראה לטלפון על סידור חדש, החלפות ועוד.</span>
+          <button type="button" disabled={busy} onClick={() => void act(enablePush, 'ההתראות הופעלו ✓')} className={`${btn} bg-brand-600 text-white`}>
+            הפעלה
+          </button>
+        </div>
+      )}
+      {state === 'on' && (
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-semibold text-emerald-700">✓ התראות פעילות במכשיר הזה</span>
+          <span className="flex gap-1.5">
+            <button type="button" disabled={busy} onClick={() => void act(sendTestPush, 'נשלחה התראת בדיקה')} className={`${btn} bg-white ring-1 ring-stone-200`}>
+              בדיקה
+            </button>
+            <button type="button" disabled={busy} onClick={() => void act(disablePush, 'ההתראות כובו')} className={`${btn} text-stone-500`}>
+              כיבוי
+            </button>
+          </span>
+        </div>
+      )}
+      {msg && <p className="mt-2 text-stone-700">{msg}</p>}
+    </div>
+  )
 }
 
 export default function Bell() {
@@ -55,6 +121,7 @@ export default function Bell() {
               </button>
             )}
           </div>
+          <PushControl />
           <ul className="max-h-96 overflow-y-auto">
             {app.notices.length === 0 && <li className="px-4 py-8 text-center text-sm text-stone-400">אין התראות</li>}
             {app.notices.map((n) => (

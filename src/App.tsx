@@ -55,8 +55,18 @@ interface ShellProps {
 
 function Shell({ base, initialWeek, onRoleChange, onLogout, error, toast }: ShellProps) {
   const [weekStart, setWeekStart] = useState(initialWeek)
-  const [tab, setTab] = useState('schedule')
+  // A tapped notification opens the app on the screen it is about (?tab=...), or tells an open app to switch.
+  const [tab, setTab] = useState(() => new URLSearchParams(location.search).get('tab') || 'schedule')
   const { role, me, online } = base
+
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return
+    const onMessage = (e: MessageEvent) => {
+      if (e.data?.type === 'go' && typeof e.data.tab === 'string') setTab(e.data.tab || 'schedule')
+    }
+    navigator.serviceWorker.addEventListener('message', onMessage)
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage)
+  }, [])
 
   const schedulable = useMemo(() => base.employees.filter((e) => e.schedulable !== false && e.active !== false), [base.employees])
   const need = useMemo(() => makeNeed(base.config), [base.config])

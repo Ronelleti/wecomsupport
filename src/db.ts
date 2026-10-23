@@ -274,6 +274,9 @@ export const api = {
     const { error } = await db().from('app_settings').upsert({ key: 'pref_deadline_day', value: day })
     if (error) throw new Error(error.message)
   },
+  savePushSubscription: (endpoint: string, p256dh: string, auth: string, ua: string) =>
+    rpc('save_push_subscription', { p_endpoint: endpoint, p_p256dh: p256dh, p_auth: auth, p_ua: ua }),
+  removePushSubscription: (endpoint: string) => rpc('remove_push_subscription', { p_endpoint: endpoint }),
   remindPreferences: (week: string) => rpc('remind_preferences', { p_week: week }) as Promise<number>,
   calendarToken: () => rpc('get_calendar_token', {}) as Promise<string>,
   async markRead(ids: string[]) {
