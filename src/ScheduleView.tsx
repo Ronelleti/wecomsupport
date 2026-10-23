@@ -53,6 +53,23 @@ export default function ScheduleView({ weekStart, setWeekStart }: Props) {
     for (const k of KINDS) shortage += Math.max(0, required(d, k, weekday(d)) - inCell(d, k).length)
   }
 
+  const clearWeek = () => {
+    if (!weekAssignments.length) return
+    // Shifts a main manager approved as an exception can't be removed by a manager.
+    const locked = canOverride ? [] : weekAssignments.filter((a) => a.override)
+    const wasPublished = online && published
+    const msg = wasPublished
+      ? 'השבוע מפורסם. המחיקה תמחק את כל המשמרות שלו ותבטל את הפרסום. להמשיך?'
+      : `למחוק את כל ${weekAssignments.length} המשמרות בשבוע הזה?`
+    if (!confirm(msg)) return
+    void (async () => {
+      // Unpublish first so workers never see a half-empty week.
+      if (wasPublished && !(await app.run(() => api.publishWeek(weekStart, false))).ok) return
+      app.saveAssignments(assignments.filter((a) => !dates.includes(a.date) || locked.includes(a)))
+      if (locked.length) alert(`${locked.length} משמרות שאושרו כחריגה על ידי מנהל ראשי לא נמחקו.`)
+    })()
+  }
+
   const generate = () => {
     if (weekAssignments.length && !confirm('יצירה אוטומטית תחליף את כל השיבוץ הקיים בשבוע הזה. להמשיך?')) return
     const { assignments: draft, unfilled, remaining } = autoDraft({ weekStart, employees, rules, existing: assignments, ctx })
@@ -215,6 +232,14 @@ export default function ScheduleView({ weekStart, setWeekStart }: Props) {
           </span>
           <button type="button" onClick={generate} className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-brand-700 shadow-sm ring-1 ring-brand-200 hover:bg-brand-50">
             ✨ יצירה אוטומטית
+          </button>
+          <button
+            type="button"
+            onClick={clearWeek}
+            disabled={weekAssignments.length === 0}
+            className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-rose-700 shadow-sm ring-1 ring-rose-200 hover:bg-rose-50 disabled:opacity-40 disabled:hover:bg-white"
+          >
+            🗑 מחיקת השבוע
           </button>
           {online && (
             <button
