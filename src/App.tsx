@@ -115,7 +115,7 @@ function Shell({ base, initialWeek, onRoleChange, onLogout, error, toast }: Shel
                   </label>
                 ) : (
                   <>
-                    {me?.schedulable !== false && <Bell />}
+                    {(me?.schedulable !== false || canApprove(role)) && <Bell />}
                     <button type="button" onClick={onLogout} className="rounded-lg px-2 py-1.5 text-sm text-stone-500 hover:bg-stone-100">
                       {me?.name} · יציאה
                     </button>
