@@ -18,7 +18,11 @@ export default async (req: Request) => {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
     return json(500, { error: 'ההתראות לא מוגדרות בשרת' })
   }
-  webpush.setVapidDetails(VAPID_SUBJECT || 'https://example.com', VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY)
+  try {
+    webpush.setVapidDetails(VAPID_SUBJECT || 'https://example.com', VAPID_PUBLIC_KEY.trim(), VAPID_PRIVATE_KEY.trim())
+  } catch {
+    return json(500, { error: 'מפתחות ההתראות בשרת לא תקינים. בדקו VAPID_PUBLIC_KEY ו-VAPID_PRIVATE_KEY ב-Netlify.' })
+  }
   const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } })
 
   const body = await req.json().catch(() => null)
