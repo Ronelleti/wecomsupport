@@ -1,6 +1,6 @@
 import { DEFAULT_CONFIG } from './data.ts'
 import { supabase } from './supabase.ts'
-import type { Assignment, AuditEntry, Config, Employee, Notice, Preference, Role, Rule, ShiftKind, Swap, SwapStatus, TimeOff } from './types.ts'
+import type { Assignment, AuditEntry, Attendance, Config, Department, Employee, Notice, Preference, Role, Rule, ShiftKind, Swap, SwapStatus, TimeOff } from './types.ts'
 
 const db = () => {
   if (!supabase) throw new Error('Supabase is not configured')
@@ -18,12 +18,14 @@ interface EmployeeRow {
   role: Role
   must_change_password: boolean
   password_changed_at: string | null
+  department_id: string | null
 }
 
 const toEmployee = (r: EmployeeRow): Employee => ({
   id: r.id,
   name: r.name,
   target: r.target,
+  departmentId: r.department_id,
   schedulable: r.schedulable,
   active: r.active,
   email: r.email,
@@ -87,15 +89,16 @@ export async function fetchRules(): Promise<Rule[]> {
 export async function fetchAssignments(): Promise<Assignment[]> {
   const { data, error } = await db().from('assignments').select('*')
   if (error) throw error
-  return (data as { id: string; date: string; kind: Assignment['kind']; employee_id: string; override: boolean }[]).map(
-    (r) => ({
-      id: r.id,
-      date: r.date,
-      kind: r.kind,
-      employeeId: r.employee_id,
-      ...(r.override ? { override: true } : {}),
-    }),
-  )
+  return (
+    data as { id: string; date: string; kind: Assignment['kind']; employee_id: string; department_id: string; override: boolean }[]
+  ).map((r) => ({
+    id: r.id,
+    date: r.date,
+    kind: r.kind,
+    employeeId: r.employee_id,
+    departmentId: r.department_id,
+    ...(r.override ? { override: true } : {}),
+  }))
 }
 
 /** Writes the difference between two assignment lists. */
@@ -114,6 +117,7 @@ export async function syncAssignments(prev: Assignment[], next: Assignment[]) {
       date: a.date,
       kind: a.kind,
       employee_id: a.employeeId,
+      department_id: a.departmentId,
       override: !!a.override,
     }))
     const { error } = await db().from('assignments').upsert(rows)
@@ -146,6 +150,8 @@ export interface Extras {
   swaps: Swap[]
   notices: Notice[]
   config: Config
+  departments: Department[]
+  attendance: Attendance[]
 }
 
 const must = <T>(r: { data: T | null; error: unknown }): T => {
@@ -155,7 +161,7 @@ const must = <T>(r: { data: T | null; error: unknown }): T => {
 
 export async function fetchExtras(): Promise<Extras> {
   const c = db()
-  const [weeks, timeOff, prefs, swaps, notices, staffing, holidays, settings] = await Promise.all([
+  const [weeks, timeOff, prefs, swaps, notices, staffing, holidays, settings, depts, attendance] = await Promise.all([
     c.from('weeks').select('*'),
     c.from('time_off').select('*').order('from_date'),
     c.from('preferences').select('*'),
@@ -164,19 +170,33 @@ export async function fetchExtras(): Promise<Extras> {
     c.from('staffing').select('*'),
     c.from('holidays').select('*'),
     c.from('app_settings').select('*'),
+    c.from('departments').select('*').order('sort'),
+    c.from('attendance').select('*').order('date', { ascending: false }),
   ])
+  const departments = must<{ id: string; name: string; sort: number; active: boolean }[]>(depts)
   const config: Config = {
-    staffing: structuredClone(DEFAULT_CONFIG.staffing),
+    staffing: Object.fromEntries(
+      departments.map((d) => [d.id, structuredClone(DEFAULT_CONFIG.staffing.service)]),
+    ),
     holidays: Object.fromEntries(must<{ date: string; name: string }[]>(holidays).map((h) => [h.date, h.name])),
     prefDeadlineDay: DEFAULT_CONFIG.prefDeadlineDay,
   }
-  for (const s of must<{ day_type: number; kind: ShiftKind; required: number }[]>(staffing)) {
-    config.staffing[s.day_type] = { ...config.staffing[s.day_type], [s.kind]: s.required }
+  for (const s of must<{ department_id: string; day_type: number; kind: ShiftKind; required: number }[]>(staffing)) {
+    const dept = (config.staffing[s.department_id] ??= structuredClone(DEFAULT_CONFIG.staffing.service))
+    dept[s.day_type] = { ...dept[s.day_type], [s.kind]: s.required }
   }
   const deadline = must<{ key: string; value: unknown }[]>(settings).find((s) => s.key === 'pref_deadline_day')
   if (typeof deadline?.value === 'number') config.prefDeadlineDay = deadline.value
   return {
     config,
+    departments,
+    attendance: must<{ employee_id: string; date: string; kind: ShiftKind; status: 'late' | 'absent'; note: string | null }[]>(attendance).map((a) => ({
+      employeeId: a.employee_id,
+      date: a.date,
+      kind: a.kind,
+      status: a.status,
+      note: a.note ?? '',
+    })),
     weeks: Object.fromEntries(
       must<{ week_start: string; published: boolean }[]>(weeks).map((w) => [w.week_start, w.published]),
     ),
@@ -247,18 +267,49 @@ export const api = {
       .upsert({ employee_id: p.employeeId, week_start: p.weekStart, cells: p.cells, note: p.note, updated_at: new Date().toISOString() })
     if (error) throw new Error(error.message)
   },
-  async saveEmployee(e: { id: string; name: string; target: number; schedulable: boolean; active: boolean; role?: Role; isNew?: boolean }) {
-    const row = { id: e.id, name: e.name, target: e.target, schedulable: e.schedulable, active: e.active, ...(e.role ? { role: e.role } : {}) }
+  async saveEmployee(e: {
+    id: string
+    name: string
+    target: number
+    departmentId: string
+    schedulable: boolean
+    active: boolean
+    role?: Role
+    isNew?: boolean
+  }) {
+    const row = {
+      id: e.id,
+      name: e.name,
+      target: e.target,
+      department_id: e.departmentId,
+      schedulable: e.schedulable,
+      active: e.active,
+      ...(e.role ? { role: e.role } : {}),
+    }
     const { error } = e.isNew ? await db().from('employees').insert(row) : await db().from('employees').update(row).eq('id', e.id)
     if (error) throw new Error(error.message)
   },
   async saveStaffing(config: Config) {
-    const rows = Object.entries(config.staffing).flatMap(([day, kinds]) =>
-      Object.entries(kinds).map(([kind, required]) => ({ day_type: Number(day), kind, required })),
+    const rows = Object.entries(config.staffing).flatMap(([department, days]) =>
+      Object.entries(days).flatMap(([day, kinds]) =>
+        Object.entries(kinds).map(([kind, required]) => ({ department_id: department, day_type: Number(day), kind, required })),
+      ),
     )
     const { error } = await db().from('staffing').upsert(rows)
     if (error) throw new Error(error.message)
   },
+  async saveDepartment(d: Department) {
+    const { error } = await db().from('departments').upsert({ id: d.id, name: d.name, sort: d.sort, active: d.active })
+    if (error) throw new Error(error.message)
+    // A new department starts with no staffing needs: create its rows so they can be edited.
+    const rows = Object.entries(DEFAULT_CONFIG.staffing.service).flatMap(([day, kinds]) =>
+      Object.keys(kinds).map((kind) => ({ department_id: d.id, day_type: Number(day), kind, required: 0 })),
+    )
+    const { error: e2 } = await db().from('staffing').upsert(rows, { onConflict: 'department_id,day_type,kind', ignoreDuplicates: true })
+    if (e2) throw new Error(e2.message)
+  },
+  markAttendance: (employeeId: string, date: string, kind: ShiftKind, status: 'late' | 'absent' | '', note: string) =>
+    rpc('mark_attendance', { p_employee: employeeId, p_date: date, p_kind: kind, p_status: status, p_note: note }),
   async saveHolidays(holidays: Record<string, string>, removed: string[]) {
     if (removed.length) {
       const { error } = await db().from('holidays').delete().in('date', removed)
@@ -309,6 +360,7 @@ export interface UserAction {
   name?: string
   email?: string
   role?: Role
+  departmentId?: string
 }
 
 /** Calls the server-side function that creates logins and resets passwords. Returns the one-time password. */

@@ -35,7 +35,7 @@ function Badge({ label, tone }: { label: string; tone: string }) {
 // ---------------------------------------------------------------- My shifts
 
 export function MyShiftsView({ weekStart, setWeekStart }: { weekStart: string; setWeekStart: (s: string) => void }) {
-  const { me, assignments, timeOff, weeks } = useApp()
+  const { me, assignments, timeOff, weeks, attendance, departments } = useApp()
   const [swapping, setSwapping] = useState<Assignment | null>(null)
   const dates = weekDates(weekStart)
   const published = !!weeks[weekStart]
@@ -96,8 +96,19 @@ export function MyShiftsView({ weekStart, setWeekStart }: { weekStart: string; s
                     <div className="text-xs text-stone-500">{fmtDM(d)}</div>
                   </div>
                   {a ? (
-                    <div className="flex flex-1 items-center justify-end gap-3">
+                    <div className="flex flex-1 flex-wrap items-center justify-end gap-3">
+                      {(() => {
+                        const m = attendance.find((x) => x.employeeId === a.employeeId && x.date === a.date && x.kind === a.kind)
+                        return m ? (
+                          <span className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${m.status === 'absent' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-900'}`}>
+                            {m.status === 'absent' ? '✕ סומן: לא הגעת' : '⏰ סומן: איחור'}
+                          </span>
+                        ) : null
+                      })()}
                       <div className={`flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold ${SHIFTS[a.kind].head}`}>
+                        {departments.length > 1 && (
+                          <span className="rounded-md bg-white/60 px-1.5 text-[11px] font-medium">{departments.find((x) => x.id === a.departmentId)?.name}</span>
+                        )}
                         <span>{SHIFTS[a.kind].label}</span>
                         <span className="text-xs font-normal opacity-80" dir="ltr">
                           {SHIFTS[a.kind].time}

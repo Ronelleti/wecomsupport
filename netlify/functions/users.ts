@@ -56,7 +56,8 @@ export default async (req: Request) => {
       const name = String(body.name ?? '').trim()
       if (!name) return json(400, { error: 'חסר שם' })
       employeeId = `e_${randomBytes(5).toString('hex')}`
-      const { error } = await admin.from('employees').insert({ id: employeeId, name, email })
+      const departmentId = typeof body.departmentId === 'string' && body.departmentId ? body.departmentId : null
+      const { error } = await admin.from('employees').insert({ id: employeeId, name, email, department_id: departmentId })
       if (error) return json(400, { error: error.message })
     }
 

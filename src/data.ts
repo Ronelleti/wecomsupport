@@ -1,5 +1,5 @@
 import { weekday } from './dates.ts'
-import type { Assignment, Config, Employee, Rule, ShiftKind } from './types.ts'
+import type { Assignment, Config, Department, Employee, Rule, ShiftKind } from './types.ts'
 
 export const KINDS: ShiftKind[] = ['morning', 'mid', 'evening', 'night']
 
@@ -13,19 +13,37 @@ export const SHIFTS: Record<
   night: { label: 'לילה', time: '23:00–08:00', start: 23, head: 'bg-slate-800 text-white', cell: 'bg-slate-100/60' },
 }
 
+export const DEFAULT_DEPARTMENTS: Department[] = [
+  { id: 'tech', name: 'תמיכה טכנית', sort: 0, active: true },
+  { id: 'service', name: 'שירות', sort: 1, active: true },
+  { id: 'shiftmgr', name: 'אחמ"שיה', sort: 2, active: true },
+  { id: 'experts', name: 'מומחים', sort: 3, active: true },
+]
+
+const emptyNeed = (): Record<number, Record<ShiftKind, number>> =>
+  Object.fromEntries(Array.from({ length: 8 }, (_, d) => [d, { morning: 0, mid: 0, evening: 0, night: 0 }]))
+
 const weekdayNeed = { morning: 5, mid: 2, evening: 5, night: 1 }
 
-/** Used in demo mode and until a database value exists. Index 7 is "holiday". */
+/** Staffing for the first department; day type 7 is "holiday". The others start empty. */
+const techNeed = (): Record<number, Record<ShiftKind, number>> => ({
+  0: { ...weekdayNeed },
+  1: { ...weekdayNeed },
+  2: { ...weekdayNeed },
+  3: { ...weekdayNeed },
+  4: { ...weekdayNeed },
+  5: { morning: 5, mid: 2, evening: 4, night: 1 },
+  6: { morning: 2, mid: 0, evening: 2, night: 1 },
+  7: { morning: 5, mid: 0, evening: 5, night: 1 },
+})
+
+/** Used in demo mode and until a database value exists. */
 export const DEFAULT_CONFIG: Config = {
   staffing: {
-    0: weekdayNeed,
-    1: weekdayNeed,
-    2: weekdayNeed,
-    3: weekdayNeed,
-    4: weekdayNeed,
-    5: { morning: 5, mid: 2, evening: 4, night: 1 },
-    6: { morning: 2, mid: 0, evening: 2, night: 1 },
-    7: { morning: 5, mid: 0, evening: 5, night: 1 },
+    tech: techNeed(),
+    service: emptyNeed(),
+    shiftmgr: emptyNeed(),
+    experts: emptyNeed(),
   },
   holidays: { '2026-10-27': 'יום בחירות' },
   prefDeadlineDay: 3,
@@ -33,13 +51,13 @@ export const DEFAULT_CONFIG: Config = {
 
 /** Required headcount for a shift: holidays use their own row, other days use the weekday's row. */
 export function makeNeed(config: Config) {
-  return (date: string, kind: ShiftKind): number => {
+  return (date: string, kind: ShiftKind, departmentId: string): number => {
     const row = config.holidays[date] ? 7 : weekday(date)
-    return config.staffing[row]?.[kind] ?? 0
+    return config.staffing[departmentId]?.[row]?.[kind] ?? 0
   }
 }
 
-const E = (id: string, name: string, target = 5): Employee => ({ id, name, target })
+const E = (id: string, name: string, target = 5): Employee => ({ id, name, target, departmentId: 'tech' })
 
 export const EMPLOYEES: Employee[] = [
   E('mohammed', 'מוחמד'),
@@ -107,7 +125,7 @@ export function demoAssignments(): Assignment[] {
   for (const [date, plan] of Object.entries(DEMO)) {
     for (const kind of KINDS) {
       for (const employeeId of plan[kind] ?? []) {
-        out.push({ id: `${date}|${kind}|${employeeId}`, date, kind, employeeId })
+        out.push({ id: `${date}|${kind}|${employeeId}`, date, kind, employeeId, departmentId: 'tech' })
       }
     }
   }

@@ -1,4 +1,4 @@
-import { KINDS } from './data.ts'
+﻿import { KINDS } from './data.ts'
 import { addDays, weekDates, weekday } from './dates.ts'
 import { validate, type Context } from './rules.ts'
 import type { Assignment, Employee, Rule, ShiftKind } from './types.ts'
@@ -15,7 +15,9 @@ interface Options {
   /** Everything already saved; shifts inside the target week are ignored. */
   existing: Assignment[]
   ctx: Context
-  /** Required headcount for a shift. */
+  /** The department whose board is being built. Only its members are picked. */
+  department: string
+  /** Required headcount for a shift on this department's board. */
   need: (date: string, kind: ShiftKind) => number
   seed?: number
 }
@@ -36,12 +38,15 @@ const slotOrder = (s: Slot) => {
   return (s.kind === 'night' ? 0 : 10) + weekend * 5 + kind
 }
 
-const mk = (date: string, kind: ShiftKind, employeeId: string): Assignment => ({
-  id: `${date}|${kind}|${employeeId}`,
-  date,
-  kind,
-  employeeId,
-})
+const maker =
+  (departmentId: string) =>
+  (date: string, kind: ShiftKind, employeeId: string): Assignment => ({
+    id: `${date}|${kind}|${employeeId}`,
+    date,
+    kind,
+    employeeId,
+    departmentId,
+  })
 
 /**
  * Builds a week that follows every rule:
@@ -50,14 +55,20 @@ const mk = (date: string, kind: ShiftKind, employeeId: string): Assignment => ({
  *  3. repairs weekly minimums by swapping shifts from people who can spare them,
  *     or by adding an extra shift when needed.
  */
-export function autoDraft({ weekStart, employees, rules, existing, ctx, need: needFor, seed = 1 }: Options): DraftResult {
+export function autoDraft({ weekStart, employees, rules, existing, ctx, department, need: needFor, seed = 1 }: Options): DraftResult {
+  const mk = maker(department)
   const dates = weekDates(weekStart)
   const weekEnd = addDays(weekStart, 6)
-  const base = existing.filter(
-    (a) => (a.date < weekStart || a.date > weekEnd) && a.date >= addDays(weekStart, -35) && a.date <= addDays(weekStart, 42),
+  const inWeek = (a: Assignment) => a.date >= weekStart && a.date <= weekEnd
+  // Shifts around the week count for the rules. Inside the week, the other departments' boards are kept
+  // (a person can't be on two boards the same day) and only this department's board is rebuilt.
+  const base = existing.filter((a) =>
+    inWeek(a) ? a.departmentId !== department : a.date >= addDays(weekStart, -35) && a.date <= addDays(weekStart, 42),
   )
+  const weekBase = base.filter(inWeek)
+  const withBase = (chosen: Assignment[]) => [...weekBase, ...chosen]
 
-  const pool = employees.filter((e) => e.schedulable !== false && e.active !== false && e.target > 0)
+  const pool = employees.filter((e) => e.departmentId === department && e.schedulable !== false && e.active !== false && e.target > 0)
   const pref = new Map<string, 'prefer' | 'cant'>()
   for (const p of ctx.prefs ?? []) {
     for (const [k, v] of Object.entries(p.cells)) pref.set(`${p.employeeId}|${k}`, v)
@@ -96,7 +107,7 @@ export function autoDraft({ weekStart, employees, rules, existing, ctx, need: ne
   /** Lower is better: hard breaks, then any violation, then people still short of their minimum. */
   const cost = (chosen: Assignment[]) => {
     const v = violationsOf(chosen)
-    const counts = countsOf(chosen)
+    const counts = countsOf(withBase(chosen))
     let deficit = 0
     for (const e of pool) deficit += Math.max(0, minOf(e.id) - (counts.get(e.id) ?? 0))
     return v.filter((x) => x.severity === 'hard').length * 1000 + v.length * 10 + deficit
@@ -105,12 +116,12 @@ export function autoDraft({ weekStart, employees, rules, existing, ctx, need: ne
   const pickFor = (slot: Slot, chosen: Assignment[], relaxed: boolean): Employee | null => {
     const current = [...base, ...chosen]
     const before = new Set(validate(current, rules, employees, undefined, ctx).map((v) => v.key))
-    const counts = countsOf(chosen)
-    const nights = countsOf(chosen.filter((a) => a.kind === 'night'))
+    const counts = countsOf(withBase(chosen))
+    const nights = countsOf(withBase(chosen).filter((a) => a.kind === 'night'))
     let best: { e: Employee; score: number } | null = null
 
     for (const e of pool) {
-      if (chosen.some((a) => a.employeeId === e.id && a.date === slot.date)) continue
+      if (withBase(chosen).some((a) => a.employeeId === e.id && a.date === slot.date)) continue
       const cand = mk(slot.date, slot.kind, e.id)
       const added = validate([...current, cand], rules, employees, undefined, ctx).filter((v) => !before.has(v.key))
       if (added.some((v) => v.severity === 'hard')) continue
@@ -180,7 +191,7 @@ export function autoDraft({ weekStart, employees, rules, existing, ctx, need: ne
         const baseCost = cost(chosen)
         let best: { next: Assignment[]; c: number } | null = null
         for (const e of pool) {
-          if (e.id === a.employeeId || chosen.some((x) => x.employeeId === e.id && x.date === a.date)) continue
+          if (e.id === a.employeeId || withBase(chosen).some((x) => x.employeeId === e.id && x.date === a.date)) continue
           const next = [...chosen.filter((x) => x !== a), mk(a.date, a.kind, e.id)]
           const c = cost(next)
           if (c < baseCost && (!best || c < best.c)) best = { next, c }
@@ -206,7 +217,7 @@ export function autoDraft({ weekStart, employees, rules, existing, ctx, need: ne
   // Repair weekly minimums.
   const stuck = new Set<string>()
   for (let guard = 0; guard < 60; guard++) {
-    const counts = countsOf(chosen)
+    const counts = countsOf(withBase(chosen))
     const needy = pool
       .filter((e) => !stuck.has(e.id) && minOf(e.id) > (counts.get(e.id) ?? 0))
       .sort((a, b) => minOf(b.id) - (counts.get(b.id) ?? 0) - (minOf(a.id) - (counts.get(a.id) ?? 0)))
@@ -221,7 +232,7 @@ export function autoDraft({ weekStart, employees, rules, existing, ctx, need: ne
       if (h === e.id) continue
       const spare = (counts.get(h) ?? 0) - minOf(h)
       if (spare <= 0) continue
-      if (chosen.some((x) => x.employeeId === e.id && x.date === a.date)) continue
+      if (withBase(chosen).some((x) => x.employeeId === e.id && x.date === a.date)) continue
       const next = [...chosen.filter((x) => x !== a), mk(a.date, a.kind, e.id)]
       const c = cost(next)
       if (c < baseCost && (!bestSwap || c < bestSwap.c || (c === bestSwap.c && spare > bestSwap.spare))) bestSwap = { next, c, spare }
@@ -231,7 +242,7 @@ export function autoDraft({ weekStart, employees, rules, existing, ctx, need: ne
     let bestAdd: { next: Assignment[]; c: number; crowd: number } | null = null
     if (!bestSwap) {
       for (const date of dates) {
-        if (chosen.some((x) => x.employeeId === e.id && x.date === date)) continue
+        if (withBase(chosen).some((x) => x.employeeId === e.id && x.date === date)) continue
         for (const kind of KINDS) {
           const required = needFor(date, kind)
           if (required === 0) continue

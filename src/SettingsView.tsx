@@ -3,7 +3,7 @@ import { HE_DAYS, fmtDM } from './dates.ts'
 import { api } from './db.ts'
 import { KINDS, SHIFTS } from './data.ts'
 import { useApp } from './store.ts'
-import type { Config, ShiftKind } from './types.ts'
+import type { Config, Department, ShiftKind } from './types.ts'
 
 const card = 'rounded-2xl bg-white p-4 shadow-soft ring-1 ring-stone-200/70'
 const input = 'rounded-lg border border-stone-200 bg-white px-3 py-2 text-base outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-200'
@@ -11,16 +11,32 @@ const primary = 'rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-
 
 const ROW_LABELS = [...HE_DAYS, 'חג']
 
-/** Staffing needs, holidays and the preference deadline. */
+/** Departments, staffing needs per department, holidays and the preference deadline. */
 export default function SettingsView() {
   const app = useApp()
-  const { config } = app
+  const { config, departments } = app
   const [staffing, setStaffing] = useState<Config['staffing']>(() => structuredClone(config.staffing))
+  const [deptId, setDeptId] = useState(departments.find((d) => d.active)?.id ?? departments[0]?.id ?? '')
   const [deadline, setDeadline] = useState(config.prefDeadlineDay)
   const [holiday, setHoliday] = useState({ date: '', name: '' })
+  const [newDept, setNewDept] = useState('')
 
+  const need = staffing[deptId] ?? {}
   const setNeed = (day: number, kind: ShiftKind, value: number) =>
-    setStaffing((s) => ({ ...s, [day]: { ...s[day], [kind]: Math.max(0, Math.min(50, Number.isFinite(value) ? value : 0)) } }))
+    setStaffing((s) => ({
+      ...s,
+      [deptId]: { ...s[deptId], [day]: { ...s[deptId]?.[day], [kind]: Math.max(0, Math.min(50, Number.isFinite(value) ? value : 0)) } },
+    }))
+
+  const saveDept = (d: Department, message = 'נשמר') => void app.run(() => api.saveDepartment(d), message)
+
+  const addDept = () => {
+    const name = newDept.trim()
+    if (!name) return
+    const sort = Math.max(-1, ...departments.map((d) => d.sort)) + 1
+    saveDept({ id: `d_${crypto.randomUUID().slice(0, 8)}`, name, sort, active: true }, 'המחלקה נוספה')
+    setNewDept('')
+  }
 
   const addHoliday = () => {
     if (!holiday.date || !holiday.name.trim()) return
@@ -35,8 +51,38 @@ export default function SettingsView() {
       <h1 className="text-xl font-bold">הגדרות</h1>
 
       <section className={card}>
+        <h2 className="font-bold">מחלקות</h2>
+        <p className="mb-3 text-sm text-stone-500">לכל מחלקה יש לוח שיבוצים משלה. מחלקה שכובתה לא מופיעה בלוחות. את המחלקה של כל עובד קובעים במסך "משתמשים".</p>
+        <ul className="divide-y divide-stone-100">
+          {departments.map((d) => (
+            <DepartmentRow key={d.id} d={d} onSave={saveDept} />
+          ))}
+        </ul>
+        <div className="mt-3 flex gap-2">
+          <input className={`${input} min-w-40 flex-1`} placeholder="שם מחלקה חדשה" value={newDept} onChange={(e) => setNewDept(e.target.value)} />
+          <button type="button" className={primary} onClick={addDept}>
+            הוספה
+          </button>
+        </div>
+      </section>
+
+      <section className={card}>
         <h2 className="font-bold">כמה עובדים נדרשים בכל משמרת</h2>
-        <p className="mb-3 text-sm text-stone-500">היצירה האוטומטית וספירת החוסרים משתמשות במספרים האלה. שורת "חג" חלה על תאריכים שמוגדרים כחג למטה.</p>
+        <p className="mb-3 text-sm text-stone-500">
+          לכל מחלקה יש מספרים משלה. היצירה האוטומטית וספירת החוסרים משתמשות בהם. שורת "חג" חלה על תאריכים שמוגדרים כחג למטה. מחלקה חדשה מתחילה מאפס.
+        </p>
+        <div className="-mx-1 mb-3 flex gap-2 overflow-x-auto px-1 pb-1">
+          {departments.map((d) => (
+            <button
+              key={d.id}
+              type="button"
+              onClick={() => setDeptId(d.id)}
+              className={`shrink-0 rounded-xl px-4 py-2 text-sm font-semibold ${d.id === deptId ? 'bg-stone-900 text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}`}
+            >
+              {d.name}
+            </button>
+          ))}
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[26rem] text-center text-sm">
             <thead>
@@ -60,7 +106,7 @@ export default function SettingsView() {
                         min={0}
                         max={50}
                         className={`${input} w-16 text-center`}
-                        value={staffing[day]?.[k] ?? 0}
+                        value={need[day]?.[k] ?? 0}
                         onChange={(e) => setNeed(day, k, Number(e.target.value))}
                       />
                     </td>
@@ -71,7 +117,7 @@ export default function SettingsView() {
           </table>
         </div>
         <button type="button" className={`${primary} mt-3`} onClick={() => void app.run(() => api.saveStaffing({ ...config, staffing }), 'נשמר')}>
-          שמירת הצורך באיוש
+          שמירת הצורך באיוש (כל המחלקות)
         </button>
       </section>
 
@@ -116,5 +162,26 @@ export default function SettingsView() {
         </div>
       </section>
     </div>
+  )
+}
+
+function DepartmentRow({ d, onSave }: { d: Department; onSave: (d: Department, message?: string) => void }) {
+  const [name, setName] = useState(d.name)
+  return (
+    <li className="flex flex-wrap items-center gap-2 py-2">
+      <input className={`${input} min-w-40 flex-1`} value={name} onChange={(e) => setName(e.target.value)} />
+      <button
+        type="button"
+        disabled={!name.trim() || name.trim() === d.name}
+        onClick={() => onSave({ ...d, name: name.trim() })}
+        className="rounded-lg px-3 py-2 text-sm font-semibold text-brand-700 ring-1 ring-brand-200 hover:bg-brand-50 disabled:opacity-40"
+      >
+        שמירת שם
+      </button>
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={d.active} onChange={(e) => onSave({ ...d, active: e.target.checked }, e.target.checked ? 'המחלקה הופעלה' : 'המחלקה כובתה')} />
+        פעילה
+      </label>
+    </li>
   )
 }

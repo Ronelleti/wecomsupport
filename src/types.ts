@@ -2,10 +2,27 @@ export type ShiftKind = 'morning' | 'mid' | 'evening' | 'night'
 export type Severity = 'hard' | 'soft'
 export type Role = 'admin' | 'main' | 'manager' | 'worker'
 
+export interface Department {
+  id: string
+  name: string
+  sort: number
+  active: boolean
+}
+
+export interface Attendance {
+  employeeId: string
+  date: string
+  kind: ShiftKind
+  status: 'late' | 'absent'
+  note: string
+}
+
 export interface Employee {
   id: string
   name: string
   target: number
+  /** Home department: the board this person is scheduled on by default. */
+  departmentId?: string | null
   schedulable?: boolean
   active?: boolean
   email?: string | null
@@ -20,6 +37,8 @@ export interface Assignment {
   date: string
   kind: ShiftKind
   employeeId: string
+  /** The board (department) this shift appears on. */
+  departmentId: string
   override?: boolean
 }
 
@@ -47,7 +66,8 @@ export interface Rule {
 
 /** Staffing needs by day type (0 = Sunday .. 6 = Saturday, 7 = holiday), holidays, and settings. */
 export interface Config {
-  staffing: Record<number, Record<ShiftKind, number>>
+  /** department id -> day type -> shift kind -> required headcount */
+  staffing: Record<string, Record<number, Record<ShiftKind, number>>>
   holidays: Record<string, string>
   /** Day of the week (0 = Sunday) by which next week's preferences are due. */
   prefDeadlineDay: number

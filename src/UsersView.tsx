@@ -14,6 +14,7 @@ interface EditForm {
   id: string
   name: string
   target: number
+  departmentId: string
   schedulable: boolean
   active: boolean
   role: Role
@@ -23,7 +24,10 @@ interface EditForm {
 export default function UsersView({ employees, reload }: Props) {
   const app = useApp()
   const [edit, setEdit] = useState<EditForm | null>(null)
-  const [form, setForm] = useState<{ employeeId?: string; name: string; email: string; role: Role } | null>(null)
+  const [form, setForm] = useState<{ employeeId?: string; name: string; email: string; role: Role; departmentId: string } | null>(null)
+  const departments = app.departments.filter((d) => d.active)
+  const firstDept = departments[0]?.id ?? ''
+  const deptName = (id?: string | null) => app.departments.find((d) => d.id === id)?.name
   const [secret, setSecret] = useState<{ name: string; email: string; password: string } | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -75,14 +79,14 @@ export default function UsersView({ employees, reload }: Props) {
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={() => setEdit({ id: `e_${crypto.randomUUID().slice(0, 8)}`, name: '', target: 5, schedulable: true, active: true, role: 'worker', isNew: true })}
+            onClick={() => setEdit({ id: `e_${crypto.randomUUID().slice(0, 8)}`, name: '', target: 5, departmentId: firstDept, schedulable: true, active: true, role: 'worker', isNew: true })}
             className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-brand-700 shadow-soft ring-1 ring-brand-200 hover:bg-brand-50"
           >
             + עובד ללא משתמש
           </button>
           <button
             type="button"
-            onClick={() => setForm({ name: '', email: '', role: 'worker' })}
+            onClick={() => setForm({ name: '', email: '', role: 'worker', departmentId: firstDept })}
             className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
           >
             + עובד עם משתמש
@@ -98,7 +102,7 @@ export default function UsersView({ employees, reload }: Props) {
             <li key={e.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white p-4 shadow-soft ring-1 ring-stone-200/70">
               <div>
                 <div className="font-semibold">
-                  {e.name} <span className="text-xs font-normal text-stone-400">{e.role ? ROLE_LABEL[e.role] : ''}</span>
+                  {e.name} <span className="text-xs font-normal text-stone-400">{[e.role ? ROLE_LABEL[e.role] : '', deptName(e.departmentId) ?? ''].filter(Boolean).join(' · ')}</span>
                 </div>
                 <div className="text-xs text-stone-500" dir="ltr" style={{ textAlign: 'start' }}>
                   {e.email ?? '—'}
@@ -109,7 +113,7 @@ export default function UsersView({ employees, reload }: Props) {
                 <button
                   type="button"
                   onClick={() =>
-                    setEdit({ id: e.id, name: e.name, target: e.target, schedulable: e.schedulable !== false, active: e.active !== false, role: e.role ?? 'worker', isNew: false })
+                    setEdit({ id: e.id, name: e.name, target: e.target, departmentId: e.departmentId ?? firstDept, schedulable: e.schedulable !== false, active: e.active !== false, role: e.role ?? 'worker', isNew: false })
                   }
                   className="rounded-lg px-3 py-1.5 text-sm text-stone-600 ring-1 ring-stone-200 hover:bg-stone-50"
                 >
@@ -122,7 +126,7 @@ export default function UsersView({ employees, reload }: Props) {
                 ) : (
                   <button
                     type="button"
-                    onClick={() => setForm({ employeeId: e.id, name: e.name, email: '', role: 'worker' })}
+                    onClick={() => setForm({ employeeId: e.id, name: e.name, email: '', role: 'worker', departmentId: e.departmentId ?? firstDept })}
                     className="rounded-lg px-3 py-1.5 text-sm text-brand-700 ring-1 ring-brand-200 hover:bg-brand-50"
                   >
                     יצירת משתמש
@@ -144,6 +148,20 @@ export default function UsersView({ employees, reload }: Props) {
             <label className="block text-sm text-stone-600">
               יעד משמרות בשבוע
               <input type="number" min={0} max={7} className="mt-1 w-full rounded-xl border border-stone-200 px-3 py-2.5" value={edit.target} onChange={(e) => setEdit({ ...edit, target: Number(e.target.value) })} />
+            </label>
+            <label className="block text-sm text-stone-600">
+              מחלקה
+              <select
+                className="mt-1 w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5"
+                value={edit.departmentId}
+                onChange={(e) => setEdit({ ...edit, departmentId: e.target.value })}
+              >
+                {app.departments.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="block text-sm text-stone-600">
               תפקיד
@@ -180,6 +198,15 @@ export default function UsersView({ employees, reload }: Props) {
               <input className="w-full rounded-xl border border-stone-200 px-3 py-2.5" placeholder="שם" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
             )}
             <input className="w-full rounded-xl border border-stone-200 px-3 py-2.5" dir="ltr" type="email" placeholder="אימייל עבודה" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
+            {!form.employeeId && (
+              <select className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5" value={form.departmentId} onChange={(e) => setForm({ ...form, departmentId: e.target.value })}>
+                {departments.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+            )}
             <select className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Role })}>
               {roles.map((r) => (
                 <option key={r} value={r}>

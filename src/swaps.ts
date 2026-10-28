@@ -15,21 +15,28 @@ export function parseAssignmentId(id: string): { date: string; kind: ShiftKind; 
   return date && kind && employeeId ? { date, kind: kind as ShiftKind, employeeId } : null
 }
 
-const mk = (date: string, kind: ShiftKind, employeeId: string): Assignment => ({ id: `${date}|${kind}|${employeeId}`, date, kind, employeeId })
+/** A shift keeps its department when it changes hands. */
+const mk = (date: string, kind: ShiftKind, employeeId: string, departmentId: string): Assignment => ({
+  id: `${date}|${kind}|${employeeId}`,
+  date,
+  kind,
+  employeeId,
+  departmentId,
+})
 
 /** The assignment list after the swap is applied, or null when a shift no longer exists. */
 export function applySwap(assignments: Assignment[], s: SwapShape): Assignment[] | null {
   const a = assignments.find((x) => x.id === s.requesterAssignmentId)
   if (!a) return null
   if (s.kind === 'handover') {
-    return [...assignments.filter((x) => x.id !== a.id), mk(a.date, a.kind, s.targetId)]
+    return [...assignments.filter((x) => x.id !== a.id), mk(a.date, a.kind, s.targetId, a.departmentId)]
   }
   const b = assignments.find((x) => x.id === s.targetAssignmentId)
   if (!b) return null
   return [
     ...assignments.filter((x) => x.id !== a.id && x.id !== b.id),
-    mk(a.date, a.kind, s.targetId),
-    mk(b.date, b.kind, s.requesterId),
+    mk(a.date, a.kind, s.targetId, a.departmentId),
+    mk(b.date, b.kind, s.requesterId, b.departmentId),
   ]
 }
 

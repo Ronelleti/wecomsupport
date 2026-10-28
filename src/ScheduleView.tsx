@@ -16,11 +16,20 @@ interface Props {
 
 export default function ScheduleView({ weekStart, setWeekStart }: Props) {
   const app = useApp()
-  const { role, me, assignments, rules, timeOff, prefs, online, need: needFor } = app
+  const { role, me, assignments, rules, timeOff, prefs, online, attendance } = app
   const HOLIDAYS = app.config.holidays
   const employees = useEmployees()
   const nameOf = useNameOf()
   const dates = weekDates(weekStart)
+
+  // One board per department.
+  const departments = app.departments.filter((d) => d.active)
+  const [deptSel, setDeptSel] = useState(() =>
+    me?.departmentId && departments.some((d) => d.id === me.departmentId) ? me.departmentId : (departments[0]?.id ?? ''),
+  )
+  const deptId = departments.some((d) => d.id === deptSel) ? deptSel : (departments[0]?.id ?? '')
+  const deptName = departments.find((d) => d.id === deptId)?.name ?? ''
+  const needFor = (date: string, kind: ShiftKind) => app.need(date, kind, deptId)
   const todayISO = toISO(new Date())
   const [day, setDay] = useState(dates.includes(todayISO) ? todayISO : dates[0])
   const [pick, setPick] = useState<{ date: string; kind: ShiftKind } | null>(null)
@@ -42,46 +51,74 @@ export default function ScheduleView({ weekStart, setWeekStart }: Props) {
     })
   }, [staff, assignments, rules, employees, weekStart, ctx])
 
+  // `boardWeek` is this department's shifts for the week; `weekAssignments` is everyone's (for the rules).
   const weekAssignments = assignments.filter((a) => dates.includes(a.date))
+  const boardWeek = weekAssignments.filter((a) => a.departmentId === deptId)
+  const boardKeys = new Set(boardWeek.map((a) => `${a.employeeId}|${a.date}|${a.kind}`))
+  const onBoard = (v: Violation) =>
+    v.date && v.kind ? boardKeys.has(`${v.employeeId}|${v.date}|${v.kind}`) : employees.find((e) => e.id === v.employeeId)?.departmentId === deptId
   const inWeek = (v: Violation) => !v.date || dates.includes(v.date)
-  const hard = violations.filter((v) => v.severity === 'hard' && !v.overridden && inWeek(v))
-  const soft = violations.filter((v) => (v.severity === 'soft' || v.overridden) && inWeek(v))
+  const hard = violations.filter((v) => v.severity === 'hard' && !v.overridden && inWeek(v) && onBoard(v))
+  const soft = violations.filter((v) => (v.severity === 'soft' || v.overridden) && inWeek(v) && onBoard(v))
   const away = timeOff.filter((t) => t.status === 'approved' && t.from <= dates[6] && t.to >= dates[0])
 
-  const inCell = (date: string, kind: ShiftKind) => assignments.filter((a) => a.date === date && a.kind === kind)
+  const inCell = (date: string, kind: ShiftKind) => boardWeek.filter((a) => a.date === date && a.kind === kind)
+  const markOf = (a: Assignment) => attendance.find((m) => m.employeeId === a.employeeId && m.date === a.date && m.kind === a.kind)
 
   let shortage = 0
   for (const d of dates) {
     for (const k of KINDS) shortage += Math.max(0, needFor(d, k) - inCell(d, k).length)
   }
 
-  const sheet: SheetData = { weekStart, assignments: weekAssignments, employees, holidays: HOLIDAYS, nameOf }
+  const sheet: SheetData = {
+    weekStart,
+    assignments: boardWeek,
+    employees,
+    holidays: HOLIDAYS,
+    nameOf,
+    title: deptName,
+    attendance: staff ? attendance : [],
+  }
+
+  const hasMarks = boardWeek.some((a) => markOf(a))
 
   const clearWeek = () => {
-    if (!weekAssignments.length) return
+    if (!boardWeek.length) return
     // Shifts a main manager approved as an exception can't be removed by a manager.
-    const locked = canOverride ? [] : weekAssignments.filter((a) => a.override)
+    const locked = canOverride ? [] : boardWeek.filter((a) => a.override)
     const wasPublished = online && published
-    const msg = wasPublished
-      ? 'השבוע מפורסם. המחיקה תמחק את כל המשמרות שלו ותבטל את הפרסום. להמשיך?'
-      : `למחוק את כל ${weekAssignments.length} המשמרות בשבוע הזה?`
+    const msg = [
+      wasPublished ? `השבוע מפורסם. המחיקה תמחק את כל המשמרות של ${deptName} ותבטל את הפרסום של כל המחלקות.` : `למחוק את כל ${boardWeek.length} המשמרות של ${deptName} בשבוע הזה?`,
+      hasMarks && 'שימו לב: יש בשבוע סימוני איחור או חיסור. הסימונים נשמרים, אבל המשמרות יימחקו.',
+      'להמשיך?',
+    ]
+      .filter(Boolean)
+      .join('\n')
     if (!confirm(msg)) return
     void (async () => {
       // Unpublish first so workers never see a half-empty week.
       if (wasPublished && !(await app.run(() => api.publishWeek(weekStart, false))).ok) return
-      app.saveAssignments(assignments.filter((a) => !dates.includes(a.date) || locked.includes(a)))
+      app.saveAssignments(assignments.filter((a) => !boardWeek.includes(a) || locked.includes(a)))
       if (locked.length) alert(`${locked.length} משמרות שאושרו כחריגה על ידי מנהל ראשי לא נמחקו.`)
     })()
   }
 
   const generate = () => {
-    if (weekAssignments.length && !confirm('יצירה אוטומטית תחליף את כל השיבוץ הקיים בשבוע הזה. להמשיך?')) return
-    const { assignments: draft, unfilled, remaining } = autoDraft({ weekStart, employees, rules, existing: assignments, ctx, need: needFor })
+    if (boardWeek.length && !confirm(`יצירה אוטומטית תחליף את כל השיבוץ של ${deptName} בשבוע הזה. להמשיך?`)) return
+    const { assignments: draft, unfilled, remaining } = autoDraft({
+      weekStart,
+      employees,
+      rules,
+      existing: assignments,
+      ctx,
+      department: deptId,
+      need: needFor,
+    })
     // Shifts a main manager approved as an exception can't be removed by a manager: keep them.
-    const locked = canOverride ? [] : weekAssignments.filter((a) => a.override)
+    const locked = canOverride ? [] : boardWeek.filter((a) => a.override)
     const lockedKeys = new Set(locked.map((a) => `${a.employeeId}|${a.date}`))
     const fresh = draft.filter((a) => !lockedKeys.has(`${a.employeeId}|${a.date}`))
-    app.saveAssignments([...assignments.filter((a) => !dates.includes(a.date)), ...locked, ...fresh])
+    app.saveAssignments([...assignments.filter((a) => !boardWeek.includes(a)), ...locked, ...fresh])
     const notes = [
       unfilled && `${unfilled} משבצות נשארו ריקות: אין עובד פנוי שעומד בכל החוקים.`,
       remaining && `${remaining} אזהרות נשארו: אי אפשר לעמוד בכל החוקים וההעדפות יחד. פרטים תחת "אזהרות".`,
@@ -115,17 +152,25 @@ export default function ScheduleView({ weekStart, setWeekStart }: Props) {
           {people.map((a) => {
             const v = cellViolation(a)
             const mine = a.employeeId === me?.id
-            const cls = v
-              ? v.severity === 'hard'
-                ? 'border-rose-300 bg-rose-50 text-rose-700'
-                : 'border-amber-300 bg-amber-50 text-amber-800'
-              : a.override
-                ? 'border-amber-300 bg-amber-50 text-amber-800'
-                : mine
-                  ? 'border-brand-600 bg-brand-600 text-white shadow-[0_4px_10px_-4px_rgb(255_61_0/0.6)]'
-                  : 'border-stone-200/70 bg-white text-stone-700 shadow-sm'
+            // Late / absent marks: managers see everyone's, an employee only their own.
+            const mark = markOf(a)
+            const cls = mark
+              ? mark.status === 'absent'
+                ? 'border-rose-400 bg-rose-100 text-rose-800 line-through decoration-2'
+                : 'border-amber-400 bg-amber-100 text-amber-900'
+              : v
+                ? v.severity === 'hard'
+                  ? 'border-rose-300 bg-rose-50 text-rose-700'
+                  : 'border-amber-300 bg-amber-50 text-amber-800'
+                : a.override
+                  ? 'border-amber-300 bg-amber-50 text-amber-800'
+                  : mine
+                    ? 'border-brand-600 bg-brand-600 text-white shadow-[0_4px_10px_-4px_rgb(255_61_0/0.6)]'
+                    : 'border-stone-200/70 bg-white text-stone-700 shadow-sm'
+            const markTitle = mark ? `${mark.status === 'absent' ? 'לא הגיע' : 'איחר'}${mark.note ? `: ${mark.note}` : ''}` : v?.message
             return (
-              <span key={a.id} title={v?.message} className={`rounded-full border px-2.5 py-0.5 text-[13px] font-medium ${cls}`}>
+              <span key={a.id} title={markTitle} className={`rounded-full border px-2.5 py-0.5 text-[13px] font-medium ${cls}`}>
+                {mark && <span aria-hidden>{mark.status === 'absent' ? '✕ ' : '⏰ '}</span>}
                 {nameOf(a.employeeId)}
               </span>
             )
@@ -205,6 +250,22 @@ export default function ScheduleView({ weekStart, setWeekStart }: Props) {
 
   return (
     <div className="space-y-4">
+      {departments.length > 1 && (
+        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
+          {departments.map((d) => (
+            <button
+              key={d.id}
+              type="button"
+              onClick={() => setDeptSel(d.id)}
+              className={`shrink-0 rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                d.id === deptId ? 'bg-stone-900 text-white shadow-lift' : 'bg-white text-stone-600 shadow-soft ring-1 ring-stone-200/70 hover:bg-stone-50'
+              }`}
+            >
+              {d.name}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <WeekNav weekStart={weekStart} setWeekStart={setWeekStart} />
         {(staff || published) && <ExportMenu sheet={sheet} />}
@@ -241,7 +302,7 @@ export default function ScheduleView({ weekStart, setWeekStart }: Props) {
           <button
             type="button"
             onClick={clearWeek}
-            disabled={weekAssignments.length === 0}
+            disabled={boardWeek.length === 0}
             className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-rose-700 shadow-sm ring-1 ring-rose-200 hover:bg-rose-50 disabled:opacity-40 disabled:hover:bg-white"
           >
             🗑 מחיקת השבוע
@@ -292,12 +353,14 @@ export default function ScheduleView({ weekStart, setWeekStart }: Props) {
           rules={rules}
           ctx={ctx}
           canOverride={canOverride}
+          departmentId={deptId}
+          departmentName={deptName}
           onChange={app.saveAssignments}
           onClose={() => setPick(null)}
         />
       )}
 
-      {staff && <WeekPanel assignments={weekAssignments} violations={violations} weekStart={weekStart} />}
+      {staff && <WeekPanel assignments={weekAssignments} violations={violations} weekStart={weekStart} departmentId={deptId} />}
       {(staff || published) && <ExportSheet {...sheet} />}
     </div>
   )
@@ -412,11 +475,21 @@ function Stat({ tone, label, value, onClick }: { tone: 'rose' | 'amber' | 'emera
   )
 }
 
-function WeekPanel({ assignments, violations, weekStart }: { assignments: Assignment[]; violations: Violation[]; weekStart: string }) {
-  const employees = useEmployees()
+function WeekPanel({
+  assignments,
+  violations,
+  weekStart,
+  departmentId,
+}: {
+  assignments: Assignment[]
+  violations: Violation[]
+  weekStart: string
+  departmentId: string
+}) {
+  const employees = useEmployees().filter((e) => e.departmentId === departmentId)
   return (
     <section className="rounded-3xl bg-white p-4 shadow-soft ring-1 ring-stone-200/70">
-      <h2 className="mb-3 text-sm font-bold text-stone-500">משמרות לעובד השבוע</h2>
+      <h2 className="mb-3 text-sm font-bold text-stone-500">משמרות לעובד השבוע (כל המחלקות)</h2>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
         {employees.map((e) => {
           const n = assignments.filter((a) => a.employeeId === e.id).length
@@ -482,6 +555,8 @@ function Picker({
   rules,
   ctx,
   canOverride,
+  departmentId,
+  departmentName,
   onChange,
   onClose,
 }: {
@@ -490,31 +565,52 @@ function Picker({
   rules: Rule[]
   ctx: Context
   canOverride: boolean
+  departmentId: string
+  departmentName: string
   onChange: (a: Assignment[]) => void
   onClose: () => void
 }) {
+  const app = useApp()
   const employees = useEmployees()
   const { date, kind } = pick
-  const here = assignments.filter((a) => a.date === date && a.kind === kind)
+  const here = assignments.filter((a) => a.date === date && a.kind === kind && a.departmentId === departmentId)
+  const members = employees.filter((e) => e.departmentId === departmentId)
+  const others = employees.filter((e) => e.departmentId !== departmentId)
+  const [showOthers, setShowOthers] = useState(false)
   const wish = (employeeId: string) =>
     ctx.prefs?.find((p) => p.employeeId === employeeId && date >= p.weekStart && date <= addDays(p.weekStart, 6))?.cells[`${date}|${kind}`]
+
+  // Only managers can mark lateness or absence, and only for shifts that have already started.
+  const canMark = app.online && isStaff(app.role) && date <= toISO(new Date())
+  const markOf = (employeeId: string) => app.attendance.find((m) => m.employeeId === employeeId && m.date === date && m.kind === kind)
+  const mark = (employeeId: string, status: 'late' | 'absent' | '') => {
+    let note = ''
+    if (status) {
+      const answer = window.prompt(status === 'late' ? 'כמה זמן איחר? (הערה, לא חובה)' : 'הערה (לא חובה)')
+      if (answer === null) return
+      note = answer
+    }
+    void app.run(() => api.markAttendance(employeeId, date, kind, status, note), status ? 'הסימון נשמר' : 'הסימון הוסר')
+  }
 
   const toggle = (employeeId: string, override: boolean) => {
     const existing = here.find((a) => a.employeeId === employeeId)
     if (existing) onChange(assignments.filter((a) => a.id !== existing.id))
-    else onChange([...assignments, { id: `${date}|${kind}|${employeeId}`, date, kind, employeeId, ...(override ? { override: true } : {}) }])
+    else
+      onChange([
+        ...assignments,
+        { id: `${date}|${kind}|${employeeId}`, date, kind, employeeId, departmentId, ...(override ? { override: true } : {}) },
+      ])
   }
 
-  return (
-    <Sheet title={`${HE_DAYS[weekday(date)]} ${fmtDM(date)} · ${SHIFTS[kind].label}`} onClose={onClose}>
-      <ul className="space-y-1.5">
-        {employees.map((e) => {
+  const renderEmployee = (e: (typeof employees)[number]) => {
           const assigned = here.some((a) => a.employeeId === e.id)
-          const issues = assigned ? [] : checkAdd(assignments, rules, employees, { id: 'cand', date, kind, employeeId: e.id }, ctx)
+          const issues = assigned ? [] : checkAdd(assignments, rules, employees, { id: 'cand', date, kind, employeeId: e.id, departmentId }, ctx)
           const hardIssue = issues.find((v) => v.severity === 'hard')
           const softIssue = issues.find((v) => v.severity === 'soft')
           const blocked = !!hardIssue && !canOverride
           const w = wish(e.id)
+          const m = markOf(e.id)
           return (
             <li key={e.id}>
               <button
@@ -547,10 +643,47 @@ function Picker({
                   <span className="text-xs text-amber-700">⚠ {softIssue.message}</span>
                 ) : null}
               </button>
+              {assigned && canMark && (
+                <div className="mt-1 flex flex-wrap items-center gap-1.5 ps-8 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => mark(e.id, 'late')}
+                    className={`rounded-lg px-2.5 py-1 font-semibold ring-1 ${m?.status === 'late' ? 'bg-amber-200 text-amber-900 ring-amber-400' : 'bg-white text-stone-600 ring-stone-200 hover:bg-amber-50'}`}
+                  >
+                    ⏰ איחר
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => mark(e.id, 'absent')}
+                    className={`rounded-lg px-2.5 py-1 font-semibold ring-1 ${m?.status === 'absent' ? 'bg-rose-200 text-rose-900 ring-rose-400' : 'bg-white text-stone-600 ring-stone-200 hover:bg-rose-50'}`}
+                  >
+                    ✕ לא הגיע
+                  </button>
+                  {m && (
+                    <button type="button" onClick={() => mark(e.id, '')} className="rounded-lg px-2 py-1 text-stone-500 hover:bg-stone-100">
+                      ↺ ניקוי
+                    </button>
+                  )}
+                  {m?.note && <span className="text-stone-500">“{m.note}”</span>}
+                </div>
+              )}
             </li>
           )
-        })}
-      </ul>
+  }
+
+  const othersAssigned = others.some((e) => here.some((a) => a.employeeId === e.id))
+
+  return (
+    <Sheet title={`${departmentName} · ${HE_DAYS[weekday(date)]} ${fmtDM(date)} · ${SHIFTS[kind].label}`} onClose={onClose}>
+      <ul className="space-y-1.5">{members.map(renderEmployee)}</ul>
+      {others.length > 0 && (
+        <div className="mt-4">
+          <button type="button" onClick={() => setShowOthers((s) => !s)} className="text-sm font-semibold text-brand-700">
+            {showOthers || othersAssigned ? '▾' : '◂'} עובדים ממחלקות אחרות ({others.length})
+          </button>
+          {(showOthers || othersAssigned) && <ul className="mt-2 space-y-1.5">{others.map(renderEmployee)}</ul>}
+        </div>
+      )}
     </Sheet>
   )
 }

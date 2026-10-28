@@ -5,7 +5,8 @@ import Bell from './Bell.tsx'
 import Logo from './Logo.tsx'
 import { addDays, toISO, weekStartOf } from './dates.ts'
 import AuditView from './AuditView.tsx'
-import { DEFAULT_CONFIG, EMPLOYEES, INITIAL_RULES, demoAssignments, makeNeed } from './data.ts'
+import AttendanceView from './AttendanceView.tsx'
+import { DEFAULT_CONFIG, DEFAULT_DEPARTMENTS, EMPLOYEES, INITIAL_RULES, demoAssignments, makeNeed } from './data.ts'
 import {
   fetchAssignments,
   fetchEmployees,
@@ -37,7 +38,16 @@ const ROLES: Record<Role, string> = {
   worker: 'עובד',
 }
 
-const NO_EXTRAS: Extras = { weeks: {}, timeOff: [], prefs: [], swaps: [], notices: [], config: DEFAULT_CONFIG }
+const NO_EXTRAS: Extras = {
+  weeks: {},
+  timeOff: [],
+  prefs: [],
+  swaps: [],
+  notices: [],
+  config: DEFAULT_CONFIG,
+  departments: DEFAULT_DEPARTMENTS,
+  attendance: [],
+}
 
 type Base = Omit<AppState, 'go' | 'schedulable' | 'need'>
 
@@ -77,6 +87,7 @@ function Shell({ base, initialWeek, onRoleChange, onLogout, error, toast }: Shel
     ...(personal ? [{ id: 'my', label: 'המשמרות שלי' }] : []),
     { id: 'schedule', label: role === 'worker' ? 'סידור כללי' : 'סידור' },
     ...(online && canApprove(role) ? [{ id: 'requests', label: 'בקשות' }] : []),
+    ...(online && role !== 'worker' ? [{ id: 'attendance', label: 'נוכחות' }] : []),
     ...(personal ? [{ id: 'swaps', label: 'החלפות' }, { id: 'timeoff', label: 'חופשות' }, { id: 'prefs', label: 'העדפות' }] : []),
     ...(role === 'admin' || role === 'main' ? [{ id: 'rules', label: 'חוקים' }] : []),
     ...(online && (role === 'admin' || role === 'main')
@@ -144,6 +155,7 @@ function Shell({ base, initialWeek, onRoleChange, onLogout, error, toast }: Shel
             {current === 'schedule' && <ScheduleView weekStart={weekStart} setWeekStart={setWeekStart} />}
             {current === 'my' && <MyShiftsView weekStart={weekStart} setWeekStart={setWeekStart} />}
             {current === 'requests' && <RequestsView />}
+            {current === 'attendance' && <AttendanceView />}
             {current === 'swaps' && <SwapsView />}
             {current === 'timeoff' && <TimeOffView />}
             {current === 'prefs' && <PreferencesView />}
@@ -208,7 +220,8 @@ function Demo() {
     }
     return { assignments: demoAssignments(), rules: INITIAL_RULES }
   })
-  const [assignments, setAssignments] = useState(initial.assignments)
+  // Shifts saved before departments existed belong to the first department.
+  const [assignments, setAssignments] = useState(() => initial.assignments.map((a) => ({ ...a, departmentId: a.departmentId ?? 'tech' })))
   const [rules, setRules] = useState(initial.rules)
   const [role, setRole] = useState<Role>('main')
   const history = useUndo(assignments, setAssignments)

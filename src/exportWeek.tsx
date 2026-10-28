@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx'
 import { HE_DAYS, fmtDM, weekDates, weekday } from './dates.ts'
 import { KINDS, SHIFTS } from './data.ts'
 import Logo from './Logo.tsx'
-import type { Assignment, Employee, ShiftKind } from './types.ts'
+import type { Assignment, Attendance, Employee, ShiftKind } from './types.ts'
 
 export interface SheetData {
   weekStart: string
@@ -11,12 +11,19 @@ export interface SheetData {
   employees: Employee[]
   holidays: Record<string, string>
   nameOf: (id: string) => string
+  /** The department whose board is exported. */
+  title: string
+  /** Late / absent marks to print next to names (managers only; empty for everyone else). */
+  attendance: Attendance[]
 }
 
 const namesIn = (d: SheetData, date: string, kind: ShiftKind) =>
   d.assignments
     .filter((a) => a.date === date && a.kind === kind)
-    .map((a) => d.nameOf(a.employeeId))
+    .map((a) => {
+      const mark = d.attendance.find((m) => m.employeeId === a.employeeId && m.date === a.date && m.kind === a.kind)
+      return d.nameOf(a.employeeId) + (mark ? (mark.status === 'absent' ? ' (לא הגיע)' : ' (איחר)') : '')
+    })
     .sort((x, y) => x.localeCompare(y, 'he'))
 
 export const SHEET_ID = 'print-sheet'
@@ -31,7 +38,7 @@ export function ExportSheet(d: SheetData) {
     <div id={SHEET_ID} dir="rtl" className="fixed -left-[9999px] top-0 w-[1100px] bg-white p-6 text-stone-900 print:absolute print:left-0 print:w-full">
       <div className="mb-4 flex items-center justify-between border-b-4 border-brand-500 pb-3">
         <div>
-          <div className="text-2xl font-bold">סידור עבודה</div>
+          <div className="text-2xl font-bold">סידור עבודה{d.title ? ` · ${d.title}` : ''}</div>
           <div className="text-lg text-stone-600">
             {fmtDM(dates[0])} – {fmtDM(dates[6])} · {dates[0].slice(0, 4)}
           </div>
@@ -106,7 +113,7 @@ export function exportExcel(d: SheetData) {
   XLSX.utils.book_append_sheet(wb, s1, 'סידור')
   XLSX.utils.book_append_sheet(wb, s2, 'לפי עובד')
   wb.Workbook = { Views: [{ RTL: true }] }
-  XLSX.writeFile(wb, `סידור-${d.weekStart}.xlsx`)
+  XLSX.writeFile(wb, `סידור${d.title ? `-${d.title}` : ''}-${d.weekStart}.xlsx`)
 }
 
 /** Saves the week as a PNG, or opens the phone's share sheet (WhatsApp etc.) when it can. */
