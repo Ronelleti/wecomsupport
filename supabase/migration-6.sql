@@ -9,7 +9,7 @@ create table public.departments (
   active boolean not null default true
 );
 insert into public.departments (id, name, sort) values
-  ('tech', 'תמיכה בכל המערכת', 0),
+  ('tech', 'תמיכה', 0),
   ('service', 'שירות', 1),
   ('shiftmgr', 'אחמ"שיה', 2),
   ('experts', 'מומחים', 3);
@@ -27,7 +27,7 @@ alter table public.assignments disable trigger audit_assignments;
 alter table public.employees disable trigger audit_employees;
 alter table public.staffing disable trigger audit_staffing;
 
--- Every employee has a home department (everyone starts in "תמיכה בכל המערכת": change it in the users screen).
+-- Every employee has a home department (everyone starts in "תמיכה": change it in the users screen).
 alter table public.employees add column department_id text references public.departments (id);
 update public.employees set department_id = 'tech';
 
@@ -38,7 +38,7 @@ update public.assignments a set department_id = coalesce(e.department_id, 'tech'
 alter table public.assignments alter column department_id set not null;
 create index assignments_dept_idx on public.assignments (department_id, date);
 
--- Staffing needs are per department. Existing numbers go to "תמיכה בכל המערכת"; the others start at 0
+-- Staffing needs are per department. Existing numbers go to "תמיכה"; the others start at 0
 -- and are set in the settings screen.
 alter table public.staffing add column department_id text references public.departments (id);
 alter table public.staffing drop constraint staffing_pkey;

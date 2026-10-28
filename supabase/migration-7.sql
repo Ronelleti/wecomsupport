@@ -1,8 +1,8 @@
--- Run once in Supabase SQL Editor, after migration-6.sql.
--- 1) Renames the first department to "תמיכה בכל המערכת".
+﻿-- Run once in Supabase SQL Editor, after migration-6.sql.
+-- 1) Renames the first department to "תמיכה".
 -- 2) Adds a third attendance classification: "late_login" (איחור התחברות), next to late and absent.
 
-update public.departments set name = 'תמיכה בכל המערכת' where id = 'tech';
+update public.departments set name = 'תמיכה' where id = 'tech';
 
 alter table public.attendance drop constraint if exists attendance_status_check;
 alter table public.attendance

@@ -39,7 +39,7 @@ export const ATTENDANCE: Record<AttendanceStatus, { label: string; icon: string;
 }
 
 export const DEFAULT_DEPARTMENTS: Department[] = [
-  { id: 'tech', name: 'תמיכה בכל המערכת', sort: 0, active: true },
+  { id: 'tech', name: 'תמיכה', sort: 0, active: true },
   { id: 'service', name: 'שירות', sort: 1, active: true },
   { id: 'shiftmgr', name: 'אחמ"שיה', sort: 2, active: true },
   { id: 'experts', name: 'מומחים', sort: 3, active: true },
