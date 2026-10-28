@@ -13,9 +13,12 @@ export interface Attendance {
   employeeId: string
   date: string
   kind: ShiftKind
-  status: 'late' | 'absent'
+  /** late = arrived late; late_login = logged in to the system late; absent = didn't show up. */
+  status: AttendanceStatus
   note: string
 }
+
+export type AttendanceStatus = 'late' | 'late_login' | 'absent'
 
 export interface Employee {
   id: string

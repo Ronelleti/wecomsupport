@@ -1,6 +1,6 @@
 ﻿import * as XLSX from 'xlsx'
 import { HE_DAYS, fmtDM, weekDates, weekday } from './dates.ts'
-import { KINDS, SHIFTS } from './data.ts'
+import { ATTENDANCE, KINDS, SHIFTS } from './data.ts'
 import Logo from './Logo.tsx'
 import type { Assignment, Attendance, Employee, ShiftKind } from './types.ts'
 
@@ -21,7 +21,7 @@ const namesIn = (d: SheetData, date: string, kind: ShiftKind) =>
     .filter((a) => a.date === date && a.kind === kind)
     .map((a) => {
       const mark = d.attendance.find((m) => m.employeeId === a.employeeId && m.date === a.date && m.kind === a.kind)
-      return d.nameOf(a.employeeId) + (mark ? (mark.status === 'absent' ? ' (לא הגיע)' : ' (איחר)') : '')
+      return d.nameOf(a.employeeId) + (mark ? ` (${ATTENDANCE[mark.status].label})` : '')
     })
     .sort((x, y) => x.localeCompare(y, 'he'))
 

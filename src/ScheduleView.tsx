@@ -2,12 +2,12 @@
 import { autoDraft } from './autodraft.ts'
 import { HE_DAYS, HE_DAYS_SHORT, addDays, fmtDM, toISO, weekDates, weekday } from './dates.ts'
 import { api } from './db.ts'
-import { KINDS, SHIFTS } from './data.ts'
+import { ATTENDANCE, KINDS, SHIFTS } from './data.ts'
 import { useEmployees, useNameOf } from './employees-context.ts'
 import { ExportSheet, exportExcel, printWeek, type SheetData } from './exportWeek.tsx'
 import { checkAdd, validate, type Context } from './rules.ts'
 import { isStaff, useApp } from './store.ts'
-import type { Assignment, Rule, ShiftKind, Violation } from './types.ts'
+import type { Assignment, AttendanceStatus, Rule, ShiftKind, Violation } from './types.ts'
 
 interface Props {
   weekStart: string
@@ -155,9 +155,7 @@ export default function ScheduleView({ weekStart, setWeekStart }: Props) {
             // Late / absent marks: managers see everyone's, an employee only their own.
             const mark = markOf(a)
             const cls = mark
-              ? mark.status === 'absent'
-                ? 'border-rose-400 bg-rose-100 text-rose-800 line-through decoration-2'
-                : 'border-amber-400 bg-amber-100 text-amber-900'
+              ? ATTENDANCE[mark.status].chip
               : v
                 ? v.severity === 'hard'
                   ? 'border-rose-300 bg-rose-50 text-rose-700'
@@ -167,10 +165,10 @@ export default function ScheduleView({ weekStart, setWeekStart }: Props) {
                   : mine
                     ? 'border-brand-600 bg-brand-600 text-white shadow-[0_4px_10px_-4px_rgb(255_61_0/0.6)]'
                     : 'border-stone-200/70 bg-white text-stone-700 shadow-sm'
-            const markTitle = mark ? `${mark.status === 'absent' ? 'לא הגיע' : 'איחר'}${mark.note ? `: ${mark.note}` : ''}` : v?.message
+            const markTitle = mark ? `${ATTENDANCE[mark.status].label}${mark.note ? `: ${mark.note}` : ''}` : v?.message
             return (
               <span key={a.id} title={markTitle} className={`rounded-full border px-2.5 py-0.5 text-[13px] font-medium ${cls}`}>
-                {mark && <span aria-hidden>{mark.status === 'absent' ? '✕ ' : '⏰ '}</span>}
+                {mark && <span aria-hidden>{ATTENDANCE[mark.status].icon} </span>}
                 {nameOf(a.employeeId)}
               </span>
             )
@@ -566,10 +564,10 @@ function Picker({
   // Only managers can mark lateness or absence, and only for shifts that have already started.
   const canMark = app.online && isStaff(app.role) && date <= toISO(new Date())
   const markOf = (employeeId: string) => app.attendance.find((m) => m.employeeId === employeeId && m.date === date && m.kind === kind)
-  const mark = (employeeId: string, status: 'late' | 'absent' | '') => {
+  const mark = (employeeId: string, status: AttendanceStatus | '') => {
     let note = ''
     if (status) {
-      const answer = window.prompt(status === 'late' ? 'כמה זמן איחר? (הערה, לא חובה)' : 'הערה (לא חובה)')
+      const answer = window.prompt(status === 'absent' ? 'הערה (לא חובה)' : 'כמה זמן איחר? (הערה, לא חובה)')
       if (answer === null) return
       note = answer
     }
@@ -628,20 +626,16 @@ function Picker({
               </button>
               {assigned && canMark && (
                 <div className="mt-1 flex flex-wrap items-center gap-1.5 ps-8 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => mark(e.id, 'late')}
-                    className={`rounded-lg px-2.5 py-1 font-semibold ring-1 ${m?.status === 'late' ? 'bg-amber-200 text-amber-900 ring-amber-400' : 'bg-white text-stone-600 ring-stone-200 hover:bg-amber-50'}`}
-                  >
-                    ⏰ איחר
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => mark(e.id, 'absent')}
-                    className={`rounded-lg px-2.5 py-1 font-semibold ring-1 ${m?.status === 'absent' ? 'bg-rose-200 text-rose-900 ring-rose-400' : 'bg-white text-stone-600 ring-stone-200 hover:bg-rose-50'}`}
-                  >
-                    ✕ לא הגיע
-                  </button>
+                  {(['late', 'late_login', 'absent'] as const).map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => mark(e.id, s)}
+                      className={`rounded-lg px-2.5 py-1 font-semibold ring-1 ${m?.status === s ? ATTENDANCE[s].button : 'bg-white text-stone-600 ring-stone-200 hover:bg-stone-50'}`}
+                    >
+                      {ATTENDANCE[s].icon} {ATTENDANCE[s].label}
+                    </button>
+                  ))}
                   {m && (
                     <button type="button" onClick={() => mark(e.id, '')} className="rounded-lg px-2 py-1 text-stone-500 hover:bg-stone-100">
                       ↺ ניקוי

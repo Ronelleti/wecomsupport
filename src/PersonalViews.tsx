@@ -1,7 +1,7 @@
 ﻿import { useMemo, useState } from 'react'
 import { HE_DAYS, addDays, fmtDM, fromISO, toISO, weekDates, weekStartOf, weekday } from './dates.ts'
 import { api } from './db.ts'
-import { KINDS, SHIFTS } from './data.ts'
+import { ATTENDANCE, KINDS, SHIFTS } from './data.ts'
 import { useNameOf } from './employees-context.ts'
 import { buildIcs } from './ics.ts'
 import { Sheet, WeekNav } from './ScheduleView.tsx'
@@ -100,8 +100,8 @@ export function MyShiftsView({ weekStart, setWeekStart }: { weekStart: string; s
                       {(() => {
                         const m = attendance.find((x) => x.employeeId === a.employeeId && x.date === a.date && x.kind === a.kind)
                         return m ? (
-                          <span className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${m.status === 'absent' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-900'}`}>
-                            {m.status === 'absent' ? '✕ סומן: לא הגעת' : '⏰ סומן: איחור'}
+                          <span className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${ATTENDANCE[m.status].badge}`}>
+                            {ATTENDANCE[m.status].icon} סומן: {ATTENDANCE[m.status].label}
                           </span>
                         ) : null
                       })()}

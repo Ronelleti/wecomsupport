@@ -1,6 +1,6 @@
 import { DEFAULT_CONFIG } from './data.ts'
 import { supabase } from './supabase.ts'
-import type { Assignment, AuditEntry, Attendance, Config, Department, Employee, Notice, Preference, Role, Rule, ShiftKind, Swap, SwapStatus, TimeOff } from './types.ts'
+import type { Assignment, AuditEntry, Attendance, AttendanceStatus, Config, Department, Employee, Notice, Preference, Role, Rule, ShiftKind, Swap, SwapStatus, TimeOff } from './types.ts'
 
 const db = () => {
   if (!supabase) throw new Error('Supabase is not configured')
@@ -190,7 +190,7 @@ export async function fetchExtras(): Promise<Extras> {
   return {
     config,
     departments,
-    attendance: must<{ employee_id: string; date: string; kind: ShiftKind; status: 'late' | 'absent'; note: string | null }[]>(attendance).map((a) => ({
+    attendance: must<{ employee_id: string; date: string; kind: ShiftKind; status: AttendanceStatus; note: string | null }[]>(attendance).map((a) => ({
       employeeId: a.employee_id,
       date: a.date,
       kind: a.kind,
@@ -308,7 +308,7 @@ export const api = {
     const { error: e2 } = await db().from('staffing').upsert(rows, { onConflict: 'department_id,day_type,kind', ignoreDuplicates: true })
     if (e2) throw new Error(e2.message)
   },
-  markAttendance: (employeeId: string, date: string, kind: ShiftKind, status: 'late' | 'absent' | '', note: string) =>
+  markAttendance: (employeeId: string, date: string, kind: ShiftKind, status: AttendanceStatus | '', note: string) =>
     rpc('mark_attendance', { p_employee: employeeId, p_date: date, p_kind: kind, p_status: status, p_note: note }),
   async saveHolidays(holidays: Record<string, string>, removed: string[]) {
     if (removed.length) {

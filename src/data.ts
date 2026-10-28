@@ -1,5 +1,5 @@
-import { weekday } from './dates.ts'
-import type { Assignment, Config, Department, Employee, Rule, ShiftKind } from './types.ts'
+﻿import { weekday } from './dates.ts'
+import type { Assignment, AttendanceStatus, Config, Department, Employee, Rule, ShiftKind } from './types.ts'
 
 export const KINDS: ShiftKind[] = ['morning', 'mid', 'evening', 'night']
 
@@ -13,8 +13,33 @@ export const SHIFTS: Record<
   night: { label: 'לילה', time: '23:00–08:00', start: 23, head: 'bg-slate-800 text-white', cell: 'bg-slate-100/60' },
 }
 
+/** Look and wording of each attendance classification. */
+export const ATTENDANCE: Record<AttendanceStatus, { label: string; icon: string; chip: string; badge: string; button: string }> = {
+  late: {
+    label: 'איחור',
+    icon: '⏰',
+    chip: 'border-amber-400 bg-amber-100 text-amber-900',
+    badge: 'bg-amber-100 text-amber-900',
+    button: 'bg-amber-200 text-amber-900 ring-amber-400',
+  },
+  late_login: {
+    label: 'איחור התחברות',
+    icon: '💻',
+    chip: 'border-violet-400 bg-violet-100 text-violet-900',
+    badge: 'bg-violet-100 text-violet-900',
+    button: 'bg-violet-200 text-violet-900 ring-violet-400',
+  },
+  absent: {
+    label: 'לא הגיע',
+    icon: '✕',
+    chip: 'border-rose-400 bg-rose-100 text-rose-800 line-through decoration-2',
+    badge: 'bg-rose-100 text-rose-800',
+    button: 'bg-rose-200 text-rose-900 ring-rose-400',
+  },
+}
+
 export const DEFAULT_DEPARTMENTS: Department[] = [
-  { id: 'tech', name: 'תמיכה טכנית', sort: 0, active: true },
+  { id: 'tech', name: 'תמיכה בכל המערכת', sort: 0, active: true },
   { id: 'service', name: 'שירות', sort: 1, active: true },
   { id: 'shiftmgr', name: 'אחמ"שיה', sort: 2, active: true },
   { id: 'experts', name: 'מומחים', sort: 3, active: true },
