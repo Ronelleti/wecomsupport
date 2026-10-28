@@ -27,7 +27,7 @@ export default async (req: Request) => {
   if (!userData.user) return json(401, { error: 'לא מחובר' })
   const { data: caller } = await admin
     .from('employees')
-    .select('role, active, must_change_password, password_changed_at')
+    .select('id, role, active, must_change_password, password_changed_at')
     .eq('user_id', userData.user.id)
     .maybeSingle()
   const fresh =
@@ -88,6 +88,34 @@ export default async (req: Request) => {
       .update({ must_change_password: true, password_changed_at: null })
       .eq('id', body.employeeId)
     return json(200, { password, employeeId: body.employeeId })
+  }
+
+  if (body.action === 'delete') {
+    // Removes the person completely: login, shifts, preferences, vacations, swaps, notifications and attendance marks.
+    const employeeId = String(body.employeeId ?? '')
+    if (!employeeId) return json(400, { error: 'חסר עובד' })
+    if (employeeId === caller.id) return json(400, { error: 'אי אפשר למחוק את המשתמש שלך' })
+    const { data: target } = await admin.from('employees').select('id, role, user_id').eq('id', employeeId).maybeSingle()
+    if (!target) return json(404, { error: 'העובד לא נמצא' })
+
+    if (target.role === 'admin') {
+      const { count } = await admin.from('employees').select('id', { count: 'exact', head: true }).eq('role', 'admin').eq('active', true)
+      if ((count ?? 0) <= 1) return json(400, { error: 'אי אפשר למחוק את האדמין האחרון' })
+    }
+
+    // Records this person approved or marked stay, with the approver cleared.
+    await Promise.all([
+      admin.from('attendance').update({ marked_by: null }).eq('marked_by', employeeId),
+      admin.from('swaps').update({ decided_by: null }).eq('decided_by', employeeId),
+      admin.from('time_off').update({ decided_by: null }).eq('decided_by', employeeId),
+    ])
+    const { error } = await admin.from('employees').delete().eq('id', employeeId)
+    if (error) return json(400, { error: error.message })
+    if (target.user_id) {
+      const { error: authErr } = await admin.auth.admin.deleteUser(target.user_id)
+      if (authErr) return json(500, { error: `העובד נמחק, אבל מחיקת ההתחברות נכשלה: ${authErr.message}` })
+    }
+    return json(200, { deleted: employeeId })
   }
 
   return json(400, { error: 'פעולה לא מוכרת' })

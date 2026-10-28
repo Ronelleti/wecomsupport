@@ -355,7 +355,7 @@ export async function markPasswordChanged() {
 }
 
 export interface UserAction {
-  action: 'create' | 'reset'
+  action: 'create' | 'reset' | 'delete'
   employeeId?: string
   name?: string
   email?: string
@@ -375,3 +375,6 @@ export async function callUsers(body: UserAction): Promise<{ password: string; e
   if (!res.ok) throw new Error(json.error ?? 'הפעולה נכשלה')
   return json
 }
+
+/** Permanently removes a person and their login (done on the server). */
+export const deleteUser = (employeeId: string) => callUsers({ action: 'delete', employeeId })

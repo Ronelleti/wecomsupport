@@ -1,5 +1,4 @@
-import { toPng } from 'html-to-image'
-import * as XLSX from 'xlsx'
+﻿import * as XLSX from 'xlsx'
 import { HE_DAYS, fmtDM, weekDates, weekday } from './dates.ts'
 import { KINDS, SHIFTS } from './data.ts'
 import Logo from './Logo.tsx'
@@ -114,28 +113,6 @@ export function exportExcel(d: SheetData) {
   XLSX.utils.book_append_sheet(wb, s2, 'לפי עובד')
   wb.Workbook = { Views: [{ RTL: true }] }
   XLSX.writeFile(wb, `סידור${d.title ? `-${d.title}` : ''}-${d.weekStart}.xlsx`)
-}
-
-/** Saves the week as a PNG, or opens the phone's share sheet (WhatsApp etc.) when it can. */
-export async function exportImage(weekStart: string) {
-  const el = document.getElementById(SHEET_ID)
-  if (!el) return
-  const dataUrl = await toPng(el, { pixelRatio: 2, backgroundColor: '#ffffff', cacheBust: true })
-  const blob = await (await fetch(dataUrl)).blob()
-  const name = `סידור-${weekStart}.png`
-  const file = new File([blob], name, { type: 'image/png' })
-  if (navigator.canShare?.({ files: [file] })) {
-    try {
-      await navigator.share({ files: [file], title: 'סידור עבודה' })
-      return
-    } catch {
-      // user closed the share sheet or sharing failed: fall back to a download
-    }
-  }
-  const a = document.createElement('a')
-  a.href = dataUrl
-  a.download = name
-  a.click()
 }
 
 export const printWeek = () => window.print()

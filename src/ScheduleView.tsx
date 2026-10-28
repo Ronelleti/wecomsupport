@@ -4,7 +4,7 @@ import { HE_DAYS, HE_DAYS_SHORT, addDays, fmtDM, toISO, weekDates, weekday } fro
 import { api } from './db.ts'
 import { KINDS, SHIFTS } from './data.ts'
 import { useEmployees, useNameOf } from './employees-context.ts'
-import { ExportSheet, exportExcel, exportImage, printWeek, type SheetData } from './exportWeek.tsx'
+import { ExportSheet, exportExcel, printWeek, type SheetData } from './exportWeek.tsx'
 import { checkAdd, validate, type Context } from './rules.ts'
 import { isStaff, useApp } from './store.ts'
 import type { Assignment, Rule, ShiftKind, Violation } from './types.ts'
@@ -368,8 +368,7 @@ export default function ScheduleView({ weekStart, setWeekStart }: Props) {
 
 function ExportMenu({ sheet }: { sheet: SheetData }) {
   const [open, setOpen] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const item = 'block w-full px-4 py-2.5 text-start text-sm hover:bg-stone-50 disabled:opacity-50'
+  const item = 'block w-full px-4 py-2.5 text-start text-sm hover:bg-stone-50'
   return (
     <div className="relative">
       <button
@@ -388,22 +387,6 @@ function ExportMenu({ sheet }: { sheet: SheetData }) {
             </button>
             <button type="button" className={item} onClick={() => { setOpen(false); setTimeout(printWeek, 50) }}>
               🖨 PDF / הדפסה
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              className={item}
-              onClick={async () => {
-                setBusy(true)
-                try {
-                  await exportImage(sheet.weekStart)
-                } finally {
-                  setBusy(false)
-                  setOpen(false)
-                }
-              }}
-            >
-              🖼 תמונה / שיתוף בוואטסאפ
             </button>
           </div>
         </>

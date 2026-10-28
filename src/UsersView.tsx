@@ -1,5 +1,5 @@
 ﻿import { useState } from 'react'
-import { api, callUsers } from './db.ts'
+import { api, callUsers, deleteUser } from './db.ts'
 import { useApp } from './store.ts'
 import type { Employee, Role } from './types.ts'
 
@@ -52,6 +52,17 @@ export default function UsersView({ employees, reload }: Props) {
     e.preventDefault()
     if (!form) return
     void run(() => callUsers({ action: 'create', ...form }), form.name, form.email)
+  }
+
+  const remove = async (e: Employee) => {
+    const typed = window.prompt(
+      `מחיקה סופית של ${e.name}.\nיימחקו גם כל המשמרות, ההעדפות, החופשות וההחלפות שלו/ה, ואי אפשר לשחזר.\nאם רוצים רק להפסיק לשבץ, עדיף לסמן "לא פעיל" בעריכה.\n\nלאישור, הקלידו את השם: ${e.name}`,
+    )
+    if (typed === null) return
+    if (typed.trim() !== e.name) return alert('השם לא תואם, לא נמחק כלום.')
+    setBusy(true)
+    await app.run(() => deleteUser(e.id), 'המשתמש נמחק')
+    setBusy(false)
   }
 
   const reset = (e: Employee) => {
@@ -130,6 +141,17 @@ export default function UsersView({ employees, reload }: Props) {
                     className="rounded-lg px-3 py-1.5 text-sm text-brand-700 ring-1 ring-brand-200 hover:bg-brand-50"
                   >
                     יצירת משתמש
+                  </button>
+                )}
+                {e.id !== app.me?.id && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void remove(e)}
+                    aria-label={`מחיקת ${e.name}`}
+                    className="rounded-lg px-3 py-1.5 text-sm text-rose-600 ring-1 ring-rose-200 hover:bg-rose-50 disabled:opacity-50"
+                  >
+                    🗑 מחיקה
                   </button>
                 )}
               </div>
