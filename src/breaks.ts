@@ -48,6 +48,30 @@ export function generateRows(spec: RowSpec): { kind: ShiftKind | null; times: st
   }))
 }
 
+/** A new draft for `date` with the same columns and rows as `source`. Nobody's choice is carried over. */
+export function copySheet(source: BreakSheet, date: string, newId: () => string): BreakSheet {
+  const id = newId()
+  const slots: BreakSlot[] = source.slots.map((s) => ({
+    ...s,
+    id: newId(),
+    sheetId: id,
+    times: [...s.times],
+    chosenBy: null,
+    chosenAt: null,
+  }))
+  return { ...source, id, date, status: 'draft', columns: source.columns.map((c) => ({ ...c })), slots: renumber(slots) }
+}
+
+/** Past sheets to copy from: the same weekday first (it usually has the same rhythm), then the most recent. */
+export function copyOrder(options: BreakSheet[], targetWeekday: number, weekdayOf: (date: string) => number): BreakSheet[] {
+  const usable = options.filter((s) => s.slots.length > 0)
+  return [...usable].sort((a, b) => {
+    const sameA = weekdayOf(a.date) === targetWeekday ? 0 : 1
+    const sameB = weekdayOf(b.date) === targetWeekday ? 0 : 1
+    return sameA - sameB || b.date.localeCompare(a.date)
+  })
+}
+
 /** Numbers the rows 1..n in order. */
 export const renumber = (slots: BreakSlot[]): BreakSlot[] =>
   slots.map((s, i) => ({ ...s, position: i, label: String(i + 1) }))

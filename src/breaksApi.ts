@@ -6,6 +6,8 @@ import type { Assignment, BreakColumn, BreakSheet, BreakSlot, BreakStatus, Shift
 export interface BreaksApi {
   /** All sheets for a day that the current user may see, with their rows. */
   load(date: string): Promise<BreakSheet[]>
+  /** The latest sheets of a department before a date, newest first, to copy from. */
+  recent(departmentId: string, before: string, limit: number): Promise<BreakSheet[]>
   /** Creates or updates a sheet and its rows. Rows that already exist keep who picked them. */
   saveSheet(sheet: BreakSheet, removedSlotIds: string[]): Promise<void>
   deleteSheet(id: string): Promise<void>
@@ -63,19 +65,33 @@ const toSlot = (r: SlotRow): BreakSlot => ({
   chosenAt: r.chosen_at,
 })
 
+const toSheet = (r: SheetRow): BreakSheet => ({
+  id: r.id,
+  date: r.date,
+  departmentId: r.department_id,
+  title: r.title ?? '',
+  columns: r.columns,
+  status: r.status,
+  slots: r.break_slots.map(toSlot).sort((a, b) => a.position - b.position),
+})
+
 export const remoteBreaks: BreaksApi = {
   async load(date) {
     const { data, error } = await db().from('break_sheets').select('*, break_slots(*)').eq('date', date)
     fail(error)
-    return (data as SheetRow[]).map((r) => ({
-      id: r.id,
-      date: r.date,
-      departmentId: r.department_id,
-      title: r.title ?? '',
-      columns: r.columns,
-      status: r.status,
-      slots: r.break_slots.map(toSlot).sort((a, b) => a.position - b.position),
-    }))
+    return (data as SheetRow[]).map(toSheet)
+  },
+
+  async recent(departmentId, before, limit) {
+    const { data, error } = await db()
+      .from('break_sheets')
+      .select('*, break_slots(*)')
+      .eq('department_id', departmentId)
+      .lt('date', before)
+      .order('date', { ascending: false })
+      .limit(limit)
+    fail(error)
+    return (data as SheetRow[]).map(toSheet)
   },
 
   async saveSheet(sheet, removedSlotIds) {
@@ -154,6 +170,12 @@ export function localBreaks(context: () => LocalContext): BreaksApi {
     async load(date) {
       const { isManager } = context()
       return read().filter((s) => s.date === date && (isManager || s.status !== 'draft'))
+    },
+    async recent(departmentId, before, limit) {
+      return read()
+        .filter((s) => s.departmentId === departmentId && s.date < before)
+        .sort((a, b) => b.date.localeCompare(a.date))
+        .slice(0, limit)
     },
     async saveSheet(sheet, removedSlotIds) {
       const existing = read().find((s) => s.id === sheet.id)

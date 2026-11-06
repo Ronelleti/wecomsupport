@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { BREAK_PRESETS, SUGGESTED_STARTS, audience, canTake, generateRows, mySlot, renumber, summarize } from './breaks.ts'
+import { BREAK_PRESETS, SUGGESTED_STARTS, audience, canTake, copyOrder, copySheet, generateRows, mySlot, renumber, summarize } from './breaks.ts'
 import { localBreaks, remoteBreaks, type BreaksApi } from './breaksApi.ts'
 import { KINDS, SHIFTS } from './data.ts'
 import { HE_DAYS, addDays, fmtDM, toISO, weekday } from './dates.ts'
@@ -28,6 +28,7 @@ export default function BreaksView() {
   const [sheets, setSheets] = useState<BreakSheet[] | null>(null)
   const [message, setMessage] = useState<{ text: string; tone: 'ok' | 'err' } | null>(null)
   const [editing, setEditing] = useState<{ sheet: BreakSheet; removed: string[] } | null>(null)
+  const [copying, setCopying] = useState<{ departmentId: string; options: BreakSheet[] | null } | null>(null)
 
   // The demo copy needs the latest schedule and user without being rebuilt on every render.
   const latest = useRef({ assignments, meId: me?.id ?? '', isManager: canManage })
@@ -74,6 +75,24 @@ export default function BreaksView() {
   const visible = (sheets ?? []).filter((s) => canManage || myDepartments.has(s.departmentId))
   const sheetOf = (departmentId: string) => visible.find((s) => s.departmentId === departmentId)
   const dayName = `${HE_DAYS[weekday(date)]} ${fmtDM(date)}`
+
+  /** Opens the list of earlier sheets of a department to copy from. */
+  const openCopy = async (departmentId: string) => {
+    setCopying({ departmentId, options: null })
+    try {
+      const options = await api.recent(departmentId, date, 20)
+      setCopying({ departmentId, options: copyOrder(options, weekday(date), weekday) })
+    } catch {
+      setCopying(null)
+      flash('טעינת הגיליונות הקודמים נכשלה', 'err')
+    }
+  }
+
+  /** The copy opens in the editor as a draft, so the times can be adjusted before saving. */
+  const useCopy = (source: BreakSheet) => {
+    setCopying(null)
+    setEditing({ sheet: copySheet(source, date, newId), removed: [] })
+  }
 
   const startNew = (departmentId: string) =>
     setEditing({
@@ -150,9 +169,14 @@ export default function BreaksView() {
               ) : (
                 <div className={`${card} flex flex-wrap items-center justify-between gap-3`}>
                   <span className="text-sm text-stone-500">עוד לא נפתחו הפסקות ל{d.name} ב{dayName}</span>
-                  <button type="button" className={primary} onClick={() => startNew(d.id)}>
-                    ☕ פתיחת הפסקות
-                  </button>
+                  <span className="flex flex-wrap gap-2">
+                    <button type="button" className={ghost} onClick={() => void openCopy(d.id)}>
+                      📋 העתקה מיום קודם
+                    </button>
+                    <button type="button" className={primary} onClick={() => startNew(d.id)}>
+                      ☕ פתיחת הפסקות
+                    </button>
+                  </span>
                 </div>
               )}
             </section>
@@ -172,6 +196,42 @@ export default function BreaksView() {
             onRelease={(slotId) => void act(() => api.release(slotId), 'הבחירה בוטלה')}
           />
         ))}
+
+      {copying && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-stone-900/40 backdrop-blur-[2px] md:items-center" onClick={() => setCopying(null)}>
+          <div className="max-h-[80vh] w-full overflow-y-auto rounded-t-3xl bg-white p-5 shadow-xl md:max-w-md md:rounded-3xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-lg font-bold">העתקה מיום קודם · {departments.find((d) => d.id === copying.departmentId)?.name}</h2>
+              <button type="button" onClick={() => setCopying(null)} aria-label="סגור" className="grid size-9 place-items-center rounded-full bg-stone-100 text-stone-600 hover:bg-stone-200">
+                ✕
+              </button>
+            </div>
+            <p className="mb-3 text-sm text-stone-500">נעתקות השורות והשעות, בלי הבחירות. תוכלו לתקן הכול לפני השמירה.</p>
+            {copying.options === null && <p className="py-6 text-center text-sm text-stone-400">טוען…</p>}
+            {copying.options?.length === 0 && <p className="py-6 text-center text-sm text-stone-400">אין עדיין גיליונות קודמים למחלקה הזו</p>}
+            <ul className="space-y-2">
+              {copying.options?.map((s) => (
+                <li key={s.id}>
+                  <button
+                    type="button"
+                    onClick={() => useCopy(s)}
+                    className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-start ring-1 ring-stone-200 hover:bg-brand-50"
+                  >
+                    <span>
+                      <span className="font-semibold">
+                        {HE_DAYS[weekday(s.date)]} {fmtDM(s.date)}
+                      </span>
+                      {weekday(s.date) === weekday(date) && <span className="ms-2 rounded-full bg-emerald-100 px-2 text-[11px] font-semibold text-emerald-700">אותו יום בשבוע</span>}
+                      {s.title && <span className="block text-xs text-stone-500">{s.title}</span>}
+                    </span>
+                    <span className="text-xs text-stone-500">{s.slots.length} שורות</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
 
       {editing && (
         <Editor
