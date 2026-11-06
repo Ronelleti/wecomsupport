@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BREAK_PRESETS, SUGGESTED_STARTS, audience, canTake, copyOrder, copySheet, generateRows, mySlot, renumber, summarize } from './breaks.ts'
 import { localBreaks, remoteBreaks, type BreaksApi } from './breaksApi.ts'
 import { KINDS, SHIFTS } from './data.ts'
@@ -282,6 +282,32 @@ function SheetCard(p: SheetCardProps) {
   const open = sheet.status === 'open'
   const audienceIds = audience(sheet, app.assignments)
   const th = 'px-3 py-2 text-xs font-semibold text-stone-600'
+  /** What goes in a row's last cell: the manager's menu, or the name / choose button for a rep. */
+  const action = (slot: BreakSlot) => {
+    const isMine = !!p.meId && slot.chosenBy === p.meId
+    if (p.manager) return <ManagerCell slot={slot} sheet={sheet} audienceIds={audienceIds} nameOf={p.nameOf} onAssign={p.onAssign} onClear={p.onClear} />
+    if (slot.chosenBy) {
+      return (
+        <span className="inline-flex items-center gap-2">
+          <span className={`rounded-full px-2.5 py-0.5 font-medium ${isMine ? 'bg-brand-600 text-white' : 'bg-stone-100 text-stone-700'}`}>{p.nameOf(slot.chosenBy)}</span>
+          {isMine && open && (
+            <button type="button" className="text-xs text-stone-500 hover:text-rose-600" onClick={() => p.onRelease?.(slot.id)}>
+              ביטול
+            </button>
+          )}
+        </span>
+      )
+    }
+    if (open && p.canTake?.(slot)) {
+      return (
+        <button type="button" className="rounded-lg px-3 py-1 text-sm font-semibold text-brand-700 ring-1 ring-brand-300 hover:bg-brand-50" onClick={() => p.onChoose?.(slot.id)}>
+          {mine ? 'החלפה לכאן' : 'בחירה'}
+        </button>
+      )
+    }
+    return <span className="text-stone-300">פנוי</span>
+  }
+
 
   return (
     <div className={`${card} space-y-3`}>
@@ -349,8 +375,39 @@ function SheetCard(p: SheetCardProps) {
         </>
       )}
 
-      <div className="overflow-x-auto rounded-xl ring-1 ring-stone-200">
-        <table className="w-full min-w-[30rem] border-collapse text-center text-sm">
+      {/* Phone: one card per row, so the choice button is always in view. */}
+      <ul className="space-y-2 md:hidden">
+        {sheet.slots.length === 0 && <li className="rounded-xl bg-stone-50 py-5 text-center text-sm text-stone-400">עוד אין שורות. לחצו על עריכה כדי להוסיף.</li>}
+        {sheet.slots.map((slot) => {
+          const isMine = !!p.meId && slot.chosenBy === p.meId
+          return (
+            <li key={slot.id} className={`rounded-xl p-3 ring-1 ${isMine ? 'bg-brand-50 ring-brand-300' : slot.chosenBy ? 'bg-stone-50 ring-stone-200' : 'bg-white ring-stone-200'}`}>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-lg font-bold">{slot.label}</span>
+                  {slot.kind && <span className="text-[11px] text-stone-400">{SHIFTS[slot.kind].label}</span>}
+                </div>
+                <div>{action(slot)}</div>
+              </div>
+              <div className="mt-2 grid gap-2 text-center" style={{ gridTemplateColumns: `repeat(${sheet.columns.length}, minmax(0, 1fr))` }}>
+                {sheet.columns.map((c, i) => (
+                  <div key={i} className={`rounded-lg px-1 py-1.5 ${c.minutes >= 30 ? 'bg-amber-100' : 'bg-stone-50'}`}>
+                    <div className="text-[10px] leading-tight text-stone-500">
+                      {c.name} · {c.minutes} דק׳
+                    </div>
+                    <div className="font-semibold tabular-nums" dir="ltr">
+                      {slot.times[i] || '—'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+
+      <div className="hidden overflow-x-auto rounded-xl ring-1 ring-stone-200 md:block">
+        <table className="w-full border-collapse text-center text-sm">
           <thead>
             <tr className="bg-stone-50">
               <th className={th}>מס׳</th>
@@ -384,26 +441,7 @@ function SheetCard(p: SheetCardProps) {
                       {slot.times[i] || '—'}
                     </td>
                   ))}
-                  <td className="px-3 py-2">
-                    {p.manager ? (
-                      <ManagerCell slot={slot} sheet={sheet} audienceIds={audienceIds} nameOf={p.nameOf} onAssign={p.onAssign} onClear={p.onClear} />
-                    ) : slot.chosenBy ? (
-                      <span className="inline-flex items-center gap-2">
-                        <span className={`rounded-full px-2.5 py-0.5 font-medium ${isMine ? 'bg-brand-600 text-white' : 'bg-stone-100 text-stone-700'}`}>{p.nameOf(slot.chosenBy)}</span>
-                        {isMine && open && (
-                          <button type="button" className="text-xs text-stone-500 hover:text-rose-600" onClick={() => p.onRelease?.(slot.id)}>
-                            ביטול
-                          </button>
-                        )}
-                      </span>
-                    ) : open && p.canTake?.(slot) ? (
-                      <button type="button" className="rounded-lg px-3 py-1 text-sm font-semibold text-brand-700 ring-1 ring-brand-300 hover:bg-brand-50" onClick={() => p.onChoose?.(slot.id)}>
-                        {mine ? 'החלפה לכאן' : 'בחירה'}
-                      </button>
-                    ) : (
-                      <span className="text-stone-300">פנוי</span>
-                    )}
-                  </td>
+                  <td className="px-3 py-2">{action(slot)}</td>
                 </tr>
               )
             })}
