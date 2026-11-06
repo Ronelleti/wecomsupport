@@ -19,6 +19,7 @@ interface EmployeeRow {
   must_change_password: boolean
   password_changed_at: string | null
   department_id: string | null
+  breaks_manager: boolean | null
 }
 
 const toEmployee = (r: EmployeeRow): Employee => ({
@@ -26,6 +27,7 @@ const toEmployee = (r: EmployeeRow): Employee => ({
   name: r.name,
   target: r.target,
   departmentId: r.department_id,
+  breaksManager: !!r.breaks_manager,
   schedulable: r.schedulable,
   active: r.active,
   email: r.email,
@@ -274,6 +276,7 @@ export const api = {
     departmentId: string
     schedulable: boolean
     active: boolean
+    breaksManager: boolean
     role?: Role
     isNew?: boolean
   }) {
@@ -284,6 +287,7 @@ export const api = {
       department_id: e.departmentId,
       schedulable: e.schedulable,
       active: e.active,
+      breaks_manager: e.breaksManager,
       ...(e.role ? { role: e.role } : {}),
     }
     const { error } = e.isNew ? await db().from('employees').insert(row) : await db().from('employees').update(row).eq('id', e.id)

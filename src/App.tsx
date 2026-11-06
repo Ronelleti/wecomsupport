@@ -23,9 +23,10 @@ import RequestsView from './RequestsView.tsx'
 import RulesView from './RulesView.tsx'
 import ScheduleView from './ScheduleView.tsx'
 import SettingsView from './SettingsView.tsx'
-import { AppContext, canApprove, type AppState } from './store.ts'
+import { AppContext, canApprove, managesBreaks, type AppState } from './store.ts'
 import { supabase } from './supabase.ts'
 import type { Assignment, Employee, Role, Rule } from './types.ts'
+import BreaksView from './BreaksView.tsx'
 import UsersView from './UsersView.tsx'
 
 const KEY = 'wecom-schedule-v1'
@@ -61,9 +62,11 @@ interface ShellProps {
   onLogout?: () => void
   error?: string
   toast?: { msg: string; tone: 'ok' | 'err' } | null
+  /** Demo mode only: picks which employee you are. */
+  demoUser?: React.ReactNode
 }
 
-function Shell({ base, initialWeek, onRoleChange, onLogout, error, toast }: ShellProps) {
+function Shell({ base, initialWeek, onRoleChange, onLogout, error, toast, demoUser }: ShellProps) {
   const [weekStart, setWeekStart] = useState(initialWeek)
   // A tapped notification opens the app on the screen it is about (?tab=...), or tells an open app to switch.
   const [tab, setTab] = useState(() => new URLSearchParams(location.search).get('tab') || 'schedule')
@@ -83,9 +86,12 @@ function Shell({ base, initialWeek, onRoleChange, onLogout, error, toast }: Shel
   const value = useMemo<AppState>(() => ({ ...base, schedulable, need, go: setTab }), [base, schedulable, need])
 
   const personal = online && me?.schedulable !== false
+  // Breaks: reps choose theirs, break managers open them. The local demo always shows the tab.
+  const showBreaks = online ? personal || base.canManageBreaks : true
   const tabs: { id: string; label: string }[] = [
     ...(personal ? [{ id: 'my', label: 'המשמרות שלי' }] : []),
     { id: 'schedule', label: role === 'worker' ? 'סידור כללי' : 'סידור' },
+    ...(showBreaks ? [{ id: 'breaks', label: 'הפסקות' }] : []),
     ...(online && canApprove(role) ? [{ id: 'requests', label: 'בקשות' }] : []),
     ...(online && role !== 'worker' ? [{ id: 'attendance', label: 'נוכחות' }] : []),
     ...(personal ? [{ id: 'swaps', label: 'החלפות' }, { id: 'timeoff', label: 'חופשות' }, { id: 'prefs', label: 'העדפות' }] : []),
@@ -109,6 +115,7 @@ function Shell({ base, initialWeek, onRoleChange, onLogout, error, toast }: Shel
                 <span className="hidden text-sm font-semibold text-stone-500 sm:block">סידור עבודה</span>
               </div>
               <div className="flex items-center gap-2">
+                {demoUser}
                 {onRoleChange ? (
                   <label className="flex items-center gap-2 text-xs text-stone-500">
                     <span className="hidden sm:inline">הדגמת הרשאה</span>
@@ -154,6 +161,7 @@ function Shell({ base, initialWeek, onRoleChange, onLogout, error, toast }: Shel
             {error && <p className="mb-4 rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
             {current === 'schedule' && <ScheduleView weekStart={weekStart} setWeekStart={setWeekStart} />}
             {current === 'my' && <MyShiftsView weekStart={weekStart} setWeekStart={setWeekStart} />}
+            {current === 'breaks' && <BreaksView />}
             {current === 'requests' && <RequestsView />}
             {current === 'attendance' && <AttendanceView />}
             {current === 'swaps' && <SwapsView />}
@@ -224,6 +232,8 @@ function Demo() {
   const [assignments, setAssignments] = useState(() => initial.assignments.map((a) => ({ ...a, departmentId: a.departmentId ?? 'tech' })))
   const [rules, setRules] = useState(initial.rules)
   const [role, setRole] = useState<Role>('main')
+  // Demo only: who you are, so the rep side of the breaks screen can be tried too.
+  const [meId, setMeId] = useState('elad')
   const history = useUndo(assignments, setAssignments)
 
   useEffect(() => {
@@ -237,7 +247,9 @@ function Demo() {
   const base: Base = {
     ...NO_EXTRAS,
     online: false,
+    me: EMPLOYEES.find((e) => e.id === meId),
     role,
+    canManageBreaks: managesBreaks(role),
     employees: EMPLOYEES,
     assignments,
     rules,
@@ -247,7 +259,19 @@ function Demo() {
     undo: history.undo,
     run: async (fn) => ({ ok: true, value: await fn() }),
   }
-  return <Shell base={base} initialWeek="2026-10-25" onRoleChange={setRole} />
+  const demoUser = (
+    <label className="flex items-center gap-2 text-xs text-stone-500">
+      <span className="hidden sm:inline">אני</span>
+      <select value={meId} onChange={(e) => setMeId(e.target.value)} className="rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-sm font-medium text-stone-700">
+        {EMPLOYEES.map((e) => (
+          <option key={e.id} value={e.id}>
+            {e.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+  return <Shell base={base} initialWeek="2026-10-25" onRoleChange={setRole} demoUser={demoUser} />
 }
 
 const passwordStatus = (me: Employee): 'ok' | 'first' | 'expired' => {
@@ -372,6 +396,7 @@ function Authed() {
     online: true,
     me,
     role: me.role ?? 'worker',
+    canManageBreaks: managesBreaks(me.role ?? 'worker', me.breaksManager),
     employees,
     assignments,
     rules,

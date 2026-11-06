@@ -17,6 +17,7 @@ interface EditForm {
   departmentId: string
   schedulable: boolean
   active: boolean
+  breaksManager: boolean
   role: Role
   isNew: boolean
 }
@@ -90,7 +91,7 @@ export default function UsersView({ employees, reload }: Props) {
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={() => setEdit({ id: `e_${crypto.randomUUID().slice(0, 8)}`, name: '', target: 5, departmentId: firstDept, schedulable: true, active: true, role: 'worker', isNew: true })}
+            onClick={() => setEdit({ id: `e_${crypto.randomUUID().slice(0, 8)}`, name: '', target: 5, departmentId: firstDept, schedulable: true, active: true, breaksManager: false, role: 'worker', isNew: true })}
             className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-brand-700 shadow-soft ring-1 ring-brand-200 hover:bg-brand-50"
           >
             + עובד ללא משתמש
@@ -124,7 +125,7 @@ export default function UsersView({ employees, reload }: Props) {
                 <button
                   type="button"
                   onClick={() =>
-                    setEdit({ id: e.id, name: e.name, target: e.target, departmentId: e.departmentId ?? firstDept, schedulable: e.schedulable !== false, active: e.active !== false, role: e.role ?? 'worker', isNew: false })
+                    setEdit({ id: e.id, name: e.name, target: e.target, departmentId: e.departmentId ?? firstDept, schedulable: e.schedulable !== false, active: e.active !== false, breaksManager: !!e.breaksManager, role: e.role ?? 'worker', isNew: false })
                   }
                   className="rounded-lg px-3 py-1.5 text-sm text-stone-600 ring-1 ring-stone-200 hover:bg-stone-50"
                 >
@@ -203,6 +204,10 @@ export default function UsersView({ employees, reload }: Props) {
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={edit.schedulable} onChange={(e) => setEdit({ ...edit, schedulable: e.target.checked })} />
               משובץ במשמרות
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={edit.breaksManager} onChange={(e) => setEdit({ ...edit, breaksManager: e.target.checked })} />
+              אחמ"ש: יכול לפתוח ולנהל הפסקות (מנהלים יכולים תמיד)
             </label>
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={edit.active} disabled={edit.id === app.me?.id} onChange={(e) => setEdit({ ...edit, active: e.target.checked })} />

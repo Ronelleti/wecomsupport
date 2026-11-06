@@ -307,6 +307,13 @@ export default function ScheduleView({ weekStart, setWeekStart }: Props) {
           </button>
           <button
             type="button"
+            onClick={() => app.go('breaks')}
+            className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-stone-700 shadow-sm ring-1 ring-stone-200 hover:bg-stone-50"
+          >
+            ☕ הפסקות
+          </button>
+          <button
+            type="button"
             onClick={app.undo}
             disabled={!app.canUndo}
             className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-stone-700 shadow-sm ring-1 ring-stone-200 hover:bg-stone-50 disabled:opacity-40 disabled:hover:bg-white"

@@ -21,6 +21,8 @@ export interface AppState {
   config: Config
   departments: Department[]
   attendance: Attendance[]
+  /** Can open and manage break sheets: admin, main manager, manager, or an employee flagged as a break manager. */
+  canManageBreaks: boolean
   /** Required headcount for a shift on a date, for one department's board (honours holidays). */
   need: (date: string, kind: ShiftKind, departmentId: string) => number
   saveAssignments: (a: Assignment[]) => void
@@ -41,4 +43,5 @@ export function useApp(): AppState {
 }
 
 export const isStaff = (role: Role) => role !== 'worker'
+export const managesBreaks = (role: Role, breaksManager?: boolean) => role !== 'worker' || !!breaksManager
 export const canApprove = (role: Role) => role === 'main' || role === 'manager'

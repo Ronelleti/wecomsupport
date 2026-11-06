@@ -20,10 +20,44 @@ export interface Attendance {
 
 export type AttendanceStatus = 'late' | 'late_login' | 'absent'
 
+/** One kind of break inside a break sheet row, e.g. "הפסקה קצרה" for 10 minutes. */
+export interface BreakColumn {
+  name: string
+  minutes: number
+}
+
+export type BreakStatus = 'draft' | 'open' | 'closed'
+
+/** A row a rep can take. `times` lines up with the sheet's columns ("" = no break there). */
+export interface BreakSlot {
+  id: string
+  sheetId: string
+  position: number
+  label: string
+  /** The shift this row is for; null = open to anyone on the sheet's day. */
+  kind: ShiftKind | null
+  times: string[]
+  chosenBy: string | null
+  chosenAt: string | null
+}
+
+/** Break choices for one department on one day. */
+export interface BreakSheet {
+  id: string
+  date: string
+  departmentId: string
+  title: string
+  columns: BreakColumn[]
+  status: BreakStatus
+  slots: BreakSlot[]
+}
+
 export interface Employee {
   id: string
   name: string
   target: number
+  /** Can open and manage break sheets (an אחמ"ש), on top of admin / main manager / manager. */
+  breaksManager?: boolean
   /** Home department: the board this person is scheduled on by default. */
   departmentId?: string | null
   schedulable?: boolean
