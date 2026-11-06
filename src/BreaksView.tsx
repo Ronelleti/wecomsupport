@@ -521,7 +521,7 @@ function Editor({
               <select className={small} value={gen.kind} onChange={(e) => setKindForGenerator(e.target.value as ShiftKind | 'all')}>
                 {KINDS.map((k) => (
                   <option key={k} value={k}>
-                    משמרת {SHIFTS[k].label} ({SHIFTS[k].time})
+                    {`משמרת ${SHIFTS[k].label} (⁦${SHIFTS[k].time}⁩)`}
                   </option>
                 ))}
                 <option value="all">כל המשמרות</option>
